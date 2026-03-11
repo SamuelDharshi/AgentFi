@@ -1,0 +1,115 @@
+{
+  "_format": "hh-sol-cache-2",
+  "files": {
+    "D:\\AgentFi\\AgentFi\\contracts\\ERC8004Registry.sol": {
+      "lastModificationDate": 1773161700059,
+      "contentHash": "59aca64b7f66e8532ec75013ceb606e6",
+      "sourceName": "ERC8004Registry.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "ERC8004Registry"
+      ]
+    },
+    "D:\\AgentFi\\AgentFi\\contracts\\AtomicSwap.sol": {
+      "lastModificationDate": 1773161700063,
+      "contentHash": "43c73cec3f34ee85866aa48914811806",
+      "sourceName": "AtomicSwap.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "AtomicSwap",
+        "IERC8004Reputation",
+        "IHTSPrecompile"
+      ]
+    },
+    "D:\\AgentFi\\AgentFi\\contracts\\test\\MockHTS.sol": {
+      "lastModificationDate": 1773253752683,
+      "contentHash": "711d74b0511da478b5b4fb6bf7f3071a",
+      "sourceName": "test/MockHTS.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "MockHTS"
+      ]
+    }
+  }
+}

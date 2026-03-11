@@ -1,13 +1,21 @@
 import * as fs from "fs";
 import * as path from "path";
 import dotenv from "dotenv";
-import { ethers } from "ethers";
 import {
   AccountBalanceQuery,
   AccountId,
   Client,
+  ContractCreateTransaction,
+  ContractExecuteTransaction,
+  ContractFunctionParameters,
+  ContractId,
+  FileAppendTransaction,
+  FileCreateTransaction,
+  FileId,
   Hbar,
   PrivateKey,
+  Timestamp,
+  TransactionId,
   TokenAssociateTransaction,
   TokenCreateTransaction,
   TokenType,
@@ -41,53 +49,52 @@ const MARKET_AGENT_EVM = requireEnv("MARKET_AGENT_EVM_ADDRESS"); // 0x…
 const USER_ID = requireEnv("USER_ACCOUNT_ID");
 const USER_EVM = requireEnv("USER_EVM_ADDRESS"); // 0x…
 
-// Hedera JSON-RPC relay endpoint (Hashio public relay for testnet)
-const JSON_RPC_URL =
-  process.env.HEDERA_JSON_RPC_URL ?? "https://testnet.hashio.io/api";
-
 // ---------------------------------------------------------------------------
 // Hedera native client (for HTS + balance checks)
 // ---------------------------------------------------------------------------
 
+// Measure local clock skew vs Hedera mirror node and return seconds to backdate.
+async function getClockOffset(): Promise<number> {
+  try {
+    const mirrorUrl =
+      HEDERA_NETWORK === "mainnet"
+        ? "https://mainnet-public.mirrornode.hedera.com/api/v1/transactions?limit=1"
+        : "https://testnet.mirrornode.hedera.com/api/v1/transactions?limit=1";
+    const res = await fetch(mirrorUrl);
+    const json = (await res.json()) as { transactions: { consensus_timestamp: string }[] };
+    const hederaTs = Number(json.transactions[0].consensus_timestamp.split(".")[0]);
+    const localTs = Math.floor(Date.now() / 1000);
+    const skew = localTs - hederaTs;
+    if (skew > 5) {
+      console.log(`      ⚠ Clock skew detected: local is ${skew}s ahead — backdating transactions by ${skew + 5}s`);
+    }
+    return skew > 5 ? skew + 5 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+let clockOffset = 0;
+
+function validStart(): TransactionId {
+  const nowSec = Math.floor(Date.now() / 1000) - clockOffset;
+  const ts = new Timestamp(nowSec, 0);
+  return TransactionId.withValidStart(AccountId.fromString(OPERATOR_ID), ts);
+}
+
 function getHederaClient(): Client {
   const client =
     HEDERA_NETWORK === "mainnet" ? Client.forMainnet() : Client.forTestnet();
-  client.setOperator(OPERATOR_ID, PrivateKey.fromStringED25519(OPERATOR_KEY_RAW));
+  client.setOperator(OPERATOR_ID, PrivateKey.fromStringDer(OPERATOR_KEY_RAW));
+  client.setDefaultMaxTransactionFee(new Hbar(10));
   return client;
 }
 
 // ---------------------------------------------------------------------------
-// Ethers provider pointing at Hedera EVM JSON-RPC relay
+// Solidity bytecode loader (expects solc artifacts in contracts/out/)
 // ---------------------------------------------------------------------------
 
-function getEthersWallet(): ethers.Wallet {
-  const evmKey = requireEnv("HEDERA_OPERATOR_EVM_KEY");
-
-  // Reject the all-zeros placeholder before ethers throws a cryptic bigint error
-  const stripped = evmKey.replace(/^0x/i, "");
-  if (/^0+$/.test(stripped)) {
-    throw new Error(
-      "HEDERA_OPERATOR_EVM_KEY is still the placeholder value (all zeros).\n\n" +
-      "How to get a real ECDSA key for Hedera Testnet:\n" +
-      "  1. Go to https://portal.hedera.com and sign in.\n" +
-      "  2. Open your operator account → Keys → Add key → choose ECDSA.\n" +
-      "  3. Copy the generated hex private key (starts with 0x…).\n" +
-      "  4. Paste it into contracts/.env as HEDERA_OPERATOR_EVM_KEY=0x<your-key>\n\n" +
-      "Alternatively, generate one offline with:\n" +
-      "  node -e \"const {ethers}=require('ethers'); console.log(ethers.Wallet.createRandom().privateKey)\"\n" +
-      "Then import that address into your Hedera account as an ECDSA alias."
-    );
-  }
-
-  const provider = new ethers.JsonRpcProvider(JSON_RPC_URL);
-  return new ethers.Wallet(evmKey, provider);
-}
-
-// ---------------------------------------------------------------------------
-// Solidity ABI + bytecode loaders (expects solc artifacts in contracts/out/)
-// ---------------------------------------------------------------------------
-
-function loadArtifact(name: string): { abi: ethers.InterfaceAbi; bytecode: string } {
+function loadBytecode(name: string): string {
   const artifactPath = path.resolve(__dirname, `../out/${name}.json`);
   if (!fs.existsSync(artifactPath)) {
     throw new Error(
@@ -96,11 +103,8 @@ function loadArtifact(name: string): { abi: ethers.InterfaceAbi; bytecode: strin
     );
   }
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const artifact = require(artifactPath) as {
-    abi: ethers.InterfaceAbi;
-    bytecode: { object: string };
-  };
-  return { abi: artifact.abi, bytecode: "0x" + artifact.bytecode.object };
+  const artifact = require(artifactPath) as { bytecode: { object: string } };
+  return artifact.bytecode.object; // raw hex, no 0x prefix
 }
 
 // ---------------------------------------------------------------------------
@@ -137,7 +141,7 @@ async function createHtsToken(client: Client): Promise<string> {
 
   console.log("\n[2/6] Creating HTS fungible token (USDC testnet stand-in)...");
 
-  const operatorKey = PrivateKey.fromStringED25519(OPERATOR_KEY_RAW);
+  const operatorKey = PrivateKey.fromStringDer(OPERATOR_KEY_RAW);
   const tx = await new TokenCreateTransaction()
     .setTokenName("AgentFi USD Coin")
     .setTokenSymbol("AUSDC")
@@ -148,6 +152,8 @@ async function createHtsToken(client: Client): Promise<string> {
     .setTreasuryAccountId(AccountId.fromString(OPERATOR_ID))
     .setAdminKey(operatorKey)
     .setSupplyKey(operatorKey)
+    .setTransactionValidDuration(180) // 180s window absorbs clock skew
+    .setTransactionId(validStart())
     .freezeWith(client)
     .sign(operatorKey);
 
@@ -171,106 +177,245 @@ async function fundAndAssociate(
 ): Promise<void> {
   console.log("\n[3/6] Associating HTS token with user and market-agent accounts...");
 
-  const operatorKey = PrivateKey.fromStringED25519(OPERATOR_KEY_RAW);
+  const operatorKey = PrivateKey.fromStringDer(OPERATOR_KEY_RAW);
 
-  // Associate user account
-  const userAssocTx = await new TokenAssociateTransaction()
+  // Each TokenAssociateTransaction must be co-signed by the target account's key.
+  // Load sub-account keys from env (ECDSA, 64-char hex, no 0x prefix).
+  const userKeyRaw = process.env.USER_KEY;
+  const agentKeyRaw = process.env.MARKET_AGENT_KEY;
+
+  if (!userKeyRaw || !agentKeyRaw) {
+    throw new Error(
+      "USER_KEY and MARKET_AGENT_KEY must be set in contracts/.env.\n" +
+        "TokenAssociateTransaction requires the target account's own key.\n" +
+        "Export the ECDSA private keys from https://portal.hedera.com and add them."
+    );
+  }
+
+  const userKey = PrivateKey.fromStringECDSA(userKeyRaw);
+  const agentKey = PrivateKey.fromStringECDSA(agentKeyRaw);
+
+  async function associateSafe(
+    accountId: string,
+    key: PrivateKey,
+    label: string
+  ): Promise<void> {
+    try {
+      const tx = await new TokenAssociateTransaction()
+        .setAccountId(AccountId.fromString(accountId))
+        .setTokenIds([tokenId])
+        .setTransactionValidDuration(180)
+        .setTransactionId(validStart())
+        .freezeWith(client);
+      await (await (await tx.sign(key)).execute(client)).getReceipt(client);
+      console.log(`      ✓ Token associated with ${label} (${accountId})`);
+    } catch (err: unknown) {
+      // STATUS 194 = TOKEN_ALREADY_ASSOCIATED_TO_ACCOUNT — safe to skip
+      const code = (err as { status?: { _code?: number } })?.status?._code;
+      if (code === 194) {
+        console.log(`      ⓘ Token already associated with ${label} — skipping`);
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  await associateSafe(USER_ID, userKey, "user");
+  await associateSafe(MARKET_AGENT_ID, agentKey, "market-agent");
+
+  // Check balances to decide if the funding transfer is still needed
+  const userBalance = await new AccountBalanceQuery()
     .setAccountId(AccountId.fromString(USER_ID))
-    .setTokenIds([tokenId])
-    .freezeWith(client)
-    .sign(operatorKey);
-  await (await userAssocTx.execute(client)).getReceipt(client);
-  console.log(`      ✓ Token associated with user account ${USER_ID}`);
+    .execute(client);
+  const userTokenBalance = userBalance.tokens?.get(tokenId)?.toNumber() ?? 0;
 
-  // Associate market-agent account
-  const agentAssocTx = await new TokenAssociateTransaction()
-    .setAccountId(AccountId.fromString(MARKET_AGENT_ID))
-    .setTokenIds([tokenId])
-    .freezeWith(client)
-    .sign(operatorKey);
-  await (await agentAssocTx.execute(client)).getReceipt(client);
-  console.log(`      ✓ Token associated with market-agent account ${MARKET_AGENT_ID}`);
-
-  // Send 100,000 AUSDC to user for testing
-  const transferTx = await new TransferTransaction()
-    .addTokenTransfer(tokenId, OPERATOR_ID, -100_000_000_000) // 100,000 * 10^6
-    .addTokenTransfer(tokenId, USER_ID, 100_000_000_000)
-    .addHbarTransfer(OPERATOR_ID, new Hbar(-20))
-    .addHbarTransfer(MARKET_AGENT_ID, new Hbar(20)) // Fund agent with HBAR for escrow
-    .freezeWith(client)
-    .sign(operatorKey);
-  await (await transferTx.execute(client)).getReceipt(client);
-  console.log("      ✓ Funded: 100,000 AUSDC → user;  20 HBAR → market-agent");
+  if (userTokenBalance >= 100_000_000_000) {
+    console.log("      ⓘ User already funded — skipping transfer");
+  } else {
+    // Send 100,000 AUSDC to user + 20 HBAR to market-agent for escrow
+    const transferTx = await new TransferTransaction()
+      .addTokenTransfer(tokenId, OPERATOR_ID, -100_000_000_000) // 100,000 * 10^6
+      .addTokenTransfer(tokenId, USER_ID, 100_000_000_000)
+      .addHbarTransfer(OPERATOR_ID, new Hbar(-20))
+      .addHbarTransfer(MARKET_AGENT_ID, new Hbar(20))
+      .setTransactionValidDuration(180)
+      .setTransactionId(validStart())
+      .freezeWith(client)
+      .sign(operatorKey);
+    await (await transferTx.execute(client)).getReceipt(client);
+    console.log("      ✓ Funded: 100,000 AUSDC → user;  20 HBAR → market-agent");
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Step 4 — Deploy ERC8004Registry contract via ethers.js
+// Upload bytecode to a Hedera File (required when bytecode > ~4 KB)
 // ---------------------------------------------------------------------------
 
-async function deployRegistry(wallet: ethers.Wallet): Promise<string> {
+const CHUNK_SIZE = 4096; // bytes per FileAppend transaction
+
+async function uploadBytecode(
+  client: Client,
+  operatorKey: PrivateKey,
+  hexBytecode: string
+): Promise<FileId> {
+  // Hedera's ContractCreateTransaction expects the file to contain the bytecode
+  // as a hex-encoded string (ASCII text), not raw binary bytes.
+  const bytes = Buffer.from(hexBytecode); // UTF-8 encode the hex characters
+
+  // Create the file with the first chunk
+  const firstChunk = bytes.slice(0, CHUNK_SIZE);
+  const createReceipt = await (
+    await (
+      await new FileCreateTransaction()
+        .setContents(firstChunk)
+        .setKeys([operatorKey.publicKey])
+        .setMaxTransactionFee(new Hbar(2))
+        .setTransactionValidDuration(180)
+        .setTransactionId(validStart())
+        .freezeWith(client)
+        .sign(operatorKey)
+    ).execute(client)
+  ).getReceipt(client);
+
+  const fileId = createReceipt.fileId!;
+
+  // Append remaining chunks
+  for (let offset = CHUNK_SIZE; offset < bytes.length; offset += CHUNK_SIZE) {
+    const chunk = bytes.slice(offset, offset + CHUNK_SIZE);
+    await (
+      await (
+        await new FileAppendTransaction()
+          .setFileId(fileId)
+          .setContents(chunk)
+          .setMaxTransactionFee(new Hbar(2))
+          .setTransactionValidDuration(180)
+          .setTransactionId(validStart())
+          .freezeWith(client)
+          .sign(operatorKey)
+      ).execute(client)
+    ).getReceipt(client);
+  }
+
+  return fileId;
+}
+
+// ---------------------------------------------------------------------------
+// Step 4 — Deploy ERC8004Registry contract via Hedera SDK
+// ---------------------------------------------------------------------------
+
+async function deployRegistry(
+  client: Client,
+  operatorKey: PrivateKey
+): Promise<{ address: string; contractId: ContractId }> {
   console.log("\n[4/6] Deploying ERC8004Registry.sol...");
-  const { abi, bytecode } = loadArtifact("ERC8004Registry");
-  const factory = new ethers.ContractFactory(abi, bytecode, wallet);
-  const contract = await factory.deploy();
-  await contract.waitForDeployment();
-  const address = await contract.getAddress();
-  console.log(`      ✓ ERC8004Registry deployed at: ${address}`);
-  return address;
+  const bytecode = loadBytecode("ERC8004Registry");
+  console.log("      Uploading bytecode to Hedera file store...");
+  const fileId = await uploadBytecode(client, operatorKey, bytecode);
+  console.log(`      File uploaded: ${fileId}`);
+
+  const receipt = await (
+    await (
+      await new ContractCreateTransaction()
+        .setBytecodeFileId(fileId)
+        .setGas(2_000_000)
+        .setTransactionValidDuration(180)
+        .setTransactionId(validStart())
+        .freezeWith(client)
+        .sign(operatorKey)
+    ).execute(client)
+  ).getReceipt(client);
+
+  const contractId = receipt.contractId!;
+  const address = "0x" + contractId.toSolidityAddress();
+  console.log(`      ✓ ERC8004Registry deployed: ${address} (${contractId})`);
+  return { address, contractId };
 }
 
 // ---------------------------------------------------------------------------
-// Step 5 — Deploy AtomicSwap contract via ethers.js
+// Step 5 — Deploy AtomicSwap contract via Hedera SDK
 // ---------------------------------------------------------------------------
 
 async function deployAtomicSwap(
-  wallet: ethers.Wallet,
+  client: Client,
+  operatorKey: PrivateKey,
   registryAddress: string
-): Promise<string> {
+): Promise<{ address: string; contractId: ContractId }> {
   console.log("\n[5/6] Deploying AtomicSwap.sol...");
-  const { abi, bytecode } = loadArtifact("AtomicSwap");
-  const factory = new ethers.ContractFactory(abi, bytecode, wallet);
-  const contract = await factory.deploy(registryAddress);
-  await contract.waitForDeployment();
-  const address = await contract.getAddress();
-  console.log(`      ✓ AtomicSwap deployed at: ${address}`);
-  return address;
+  const bytecode = loadBytecode("AtomicSwap");
+  console.log("      Uploading bytecode to Hedera file store...");
+  const fileId = await uploadBytecode(client, operatorKey, bytecode);
+  console.log(`      File uploaded: ${fileId}`);
+
+  const receipt = await (
+    await (
+      await new ContractCreateTransaction()
+        .setBytecodeFileId(fileId)
+        .setGas(3_000_000)
+        .setConstructorParameters(
+          new ContractFunctionParameters().addAddress(registryAddress)
+        )
+        .setTransactionValidDuration(180)
+        .setTransactionId(validStart())
+        .freezeWith(client)
+        .sign(operatorKey)
+    ).execute(client)
+  ).getReceipt(client);
+
+  const contractId = receipt.contractId!;
+  const address = "0x" + contractId.toSolidityAddress();
+  console.log(`      ✓ AtomicSwap deployed: ${address} (${contractId})`);
+  return { address, contractId };
 }
 
 // ---------------------------------------------------------------------------
-// Step 6 — Wire up: set AtomicSwap on Registry + register market-agent
+// Step 6 — Wire up: set AtomicSwap on Registry + register agents
 // ---------------------------------------------------------------------------
 
 async function wireContracts(
-  wallet: ethers.Wallet,
-  registryAddress: string,
+  client: Client,
+  operatorKey: PrivateKey,
+  registryContractId: ContractId,
   atomicSwapAddress: string
 ): Promise<void> {
   console.log("\n[6/6] Wiring contracts...");
 
-  const { abi: regAbi } = loadArtifact("ERC8004Registry");
-  const registry = new ethers.Contract(registryAddress, regAbi, wallet);
+  async function exec(fn: string, params: ContractFunctionParameters): Promise<void> {
+    await (
+      await (
+        await new ContractExecuteTransaction()
+          .setContractId(registryContractId)
+          .setGas(300_000)
+          .setFunction(fn, params)
+          .setTransactionValidDuration(180)
+          .setTransactionId(validStart())
+          .freezeWith(client)
+          .sign(operatorKey)
+      ).execute(client)
+    ).getReceipt(client);
+  }
 
-  // Point the registry at the AtomicSwap contract so it can call incrementReputation
-  const setTx = await registry.setAtomicSwapContract(atomicSwapAddress);
-  await setTx.wait();
+  // Point the registry at the AtomicSwap contract
+  await exec("setAtomicSwapContract", new ContractFunctionParameters().addAddress(atomicSwapAddress));
   console.log("      ✓ Registry.setAtomicSwapContract →", atomicSwapAddress);
 
-  // Register the market-agent identity on-chain
-  const regTx = await registry.registerAgent(
-    MARKET_AGENT_EVM,
-    "MARKET_AGENT",
-    `agentfi://agents/${MARKET_AGENT_ID}`
+  // Register market-agent identity on-chain
+  await exec(
+    "registerAgent",
+    new ContractFunctionParameters()
+      .addAddress(MARKET_AGENT_EVM)
+      .addString("MARKET_AGENT")
+      .addString(`agentfi://agents/${MARKET_AGENT_ID}`)
   );
-  await regTx.wait();
   console.log(`      ✓ Market agent registered: ${MARKET_AGENT_EVM}`);
 
-  // Register the user agent identity on-chain
-  const userTx = await registry.registerAgent(
-    USER_EVM,
-    "USER_AGENT",
-    `agentfi://agents/${USER_ID}`
+  // Register user agent identity on-chain
+  await exec(
+    "registerAgent",
+    new ContractFunctionParameters()
+      .addAddress(USER_EVM)
+      .addString("USER_AGENT")
+      .addString(`agentfi://agents/${USER_ID}`)
   );
-  await userTx.wait();
   console.log(`      ✓ User agent registered: ${USER_EVM}`);
 }
 
@@ -302,17 +447,21 @@ async function main(): Promise<void> {
   console.log(`  Operator: ${OPERATOR_ID}`);
   console.log("═══════════════════════════════════════════════════");
 
+  clockOffset = await getClockOffset();
+
   const hederaClient = getHederaClient();
-  const ethersWallet = getEthersWallet();
+  const operatorKey = PrivateKey.fromStringDer(OPERATOR_KEY_RAW);
 
   await checkBalance(hederaClient);
 
   const tokenId = await createHtsToken(hederaClient);
   await fundAndAssociate(hederaClient, tokenId);
 
-  const registryAddress = await deployRegistry(ethersWallet);
-  const atomicSwapAddress = await deployAtomicSwap(ethersWallet, registryAddress);
-  await wireContracts(ethersWallet, registryAddress, atomicSwapAddress);
+  const { address: registryAddress, contractId: registryContractId } =
+    await deployRegistry(hederaClient, operatorKey);
+  const { address: atomicSwapAddress } =
+    await deployAtomicSwap(hederaClient, operatorKey, registryAddress);
+  await wireContracts(hederaClient, operatorKey, registryContractId, atomicSwapAddress);
 
   saveDeployment({
     network: HEDERA_NETWORK,
