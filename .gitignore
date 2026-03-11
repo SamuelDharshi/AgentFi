@@ -1,48 +1,69 @@
-# Monorepo dependency directories
-**/node_modules/
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 
-# Build outputs
-**/dist/
-**/build/
-**/.next/
-**/out/
-**/coverage/
+# ─── Secrets — NEVER commit real keys or credentials ─────────────────────────
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+# Allow .env.example files (safe placeholder templates)
+!.env.example
 
-# Logs and debug
+# ─── Build outputs ────────────────────────────────────────────────────────────
+dist/
+build/
+out/
+.next/
+
+# ─── Solidity compiler output ─────────────────────────────────────────────────
+contracts/out/
+contracts/dist/
+
+# ─── Deployment artifacts (contain live contract addresses) ──────────────────
+contracts/deployed.json
+
+# ─── TypeScript ───────────────────────────────────────────────────────────────
+*.tsbuildinfo
+next-env.d.ts
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# Environment files
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# ─── Testing / Coverage ───────────────────────────────────────────────────────
+coverage/
+.nyc_output/
 
-# Keep env templates tracked
-!.env.example
-!**/.env.example
-
-# OS/editor files
+# ─── OS generated ─────────────────────────────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
 Thumbs.db
-.vscode/
+ehthumbs.db
+Desktop.ini
+
+# ─── Editor ───────────────────────────────────────────────────────────────────
+.vscode/settings.json
 .idea/
+*.swp
+*.swo
 
-# Package manager/system artifacts
-**/.pnp
-**/.pnp.*
-**/.yarn/*
-!**/.yarn/patches
-!**/.yarn/plugins
-!**/.yarn/releases
-!**/.yarn/versions
+# ─── Vercel / deployment ──────────────────────────────────────────────────────
+.vercel
 
-# TypeScript
-**/*.tsbuildinfo
-
-# Vercel
-**/.vercel/
+# ─── Key / cert files ─────────────────────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
