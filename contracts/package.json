@@ -1,0 +1,22 @@
+{
+  "name": "agentfi-contracts",
+  "version": "1.0.0",
+  "description": "AgentFi Phase 1 — Solidity smart contracts and deployment scripts",
+  "private": true,
+  "scripts": {
+    "compile": "solcjs --abi --bin --include-path node_modules/ --base-path . --output-dir out ERC8004Registry.sol AtomicSwap.sol && node scripts/buildArtifacts.js",
+    "deploy": "tsx scripts/deploy.ts",
+    "deploy:mainnet": "HEDERA_NETWORK=mainnet tsx scripts/deploy.ts"
+  },
+  "dependencies": {
+    "@hashgraph/sdk": "^2.80.0",
+    "dotenv": "^17.3.1",
+    "ethers": "^6.13.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "solc": "^0.8.20",
+    "tsx": "^4.21.0",
+    "typescript": "^5.0.0"
+  }
+}
