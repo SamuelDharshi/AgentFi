@@ -7,9 +7,11 @@ import {
   sendTradeAccept,
   sendTradeExecuted,
   sendTradeRequest,
+  startHcsBridge,
 } from "./agents/communication";
 import { buildTradeRequest } from "./agents/userAgent";
 import { createTopic, isHederaConfigured } from "./hedera/client";
+import { startOpenClawAutonomy, stopOpenClawAutonomy } from "./openclaw";
 import { executeTrade } from "./trade/executor";
 import { AgentStatus, TradeMessage, TradePayload } from "./types/messages";
 
@@ -136,10 +138,30 @@ async function bootstrap(): Promise<void> {
     topicId = await createTopic("AgentFi OTC Negotiation Topic");
   }
 
+  // Bridge live HCS messages into the in-process negotiation bus.
+  // No-op when MOCK_HEDERA=true.
+  startHcsBridge(topicId);
+
+  // Start autonomous OpenClaw heartbeat skill when OPENCLAW_AUTONOMOUS=true.
+  await startOpenClawAutonomy(topicId);
+
   const port = Number(process.env.PORT || 4000);
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     // eslint-disable-next-line no-console
     console.log(`AgentFi backend running on port ${port}; topic=${topicId}`);
+  });
+
+  // Graceful shutdown for long-running autonomous skills.
+  const shutdown = async () => {
+    await stopOpenClawAutonomy();
+    server.close(() => process.exit(0));
+  };
+
+  process.once("SIGINT", () => {
+    void shutdown();
+  });
+  process.once("SIGTERM", () => {
+    void shutdown();
   });
 }
 

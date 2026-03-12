@@ -27,7 +27,7 @@ function getClient(): Client {
   }
 
   client = network === "mainnet" ? Client.forMainnet() : Client.forTestnet();
-  client.setOperator(operatorId, PrivateKey.fromStringED25519(operatorKey));
+  client.setOperator(operatorId, PrivateKey.fromStringDer(operatorKey));
   return client;
 }
 
@@ -99,3 +99,12 @@ export function isHederaConfigured(): boolean {
 
   return Boolean(operatorId && operatorKey);
 }
+
+/**
+ * Returns the lazily-initialised Hedera client.
+ * Used by ucpBus and other modules that need the raw SDK client.
+ */
+export function getHcsClient(): Client {
+  return getClient();
+}
+
