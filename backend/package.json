@@ -7,7 +7,9 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "orchestrate:headless": "tsx src/orchestration/headlessLoop.ts"
+    "orchestrate:headless": "tsx src/orchestration/headlessLoop.ts",
+    "test:e2e-live": "jest --config jest.e2e.config.cjs --runInBand",
+    "test:e2e-live:verbose": "jest --config jest.e2e.config.cjs --runInBand --verbose"
   },
   "keywords": [],
   "author": "",
@@ -25,7 +27,10 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
     "@types/node": "^25.4.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
