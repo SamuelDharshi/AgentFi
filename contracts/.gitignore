@@ -9,6 +9,7 @@ out/
 
 # Secrets — never commit
 .env
+.env.example
 
 # Deployment output (contains contract addresses + timestamps)
 deployed.json

@@ -16,6 +16,8 @@ node_modules/
 .env.production.local
 # Allow .env.example files (safe placeholder templates)
 !.env.example
+# Local file currently containing real keys — keep out of git
+contracts/.env.example
 
 # ─── Build outputs ────────────────────────────────────────────────────────────
 dist/
