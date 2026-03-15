@@ -10,16 +10,18 @@ export default function TradePage() {
   const [messages, setMessages] = useState<TradeMessage[]>([]);
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 md:px-8">
-      <h1 className="text-3xl font-semibold text-[var(--ink)]">Trade Settlement</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">Paste a request id from /chat and execute OTC transfer flow.</p>
+    <main className="mx-auto max-w-[1300px] px-4 py-8 md:px-8">
+      <h1 className="font-[var(--font-orbitron)] text-3xl text-slate-100">Execution Console</h1>
+      <p className="mt-1 text-sm text-slate-300/80">
+        Paste a negotiated request ID and authorize AtomicSwap settlement on Hedera EVM.
+      </p>
 
-      <div className="mt-5 rounded-2xl border border-[var(--line)] bg-white/70 p-4 shadow-lg">
-        <label className="text-sm text-[var(--ink)]">Request ID</label>
+      <div className="panel-card mt-5 p-4">
+        <label className="text-sm text-slate-300">Request ID</label>
         <input
           value={requestId}
           onChange={(event) => setRequestId(event.target.value)}
-          className="mt-2 w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2"
+          className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-slate-200"
         />
       </div>
 

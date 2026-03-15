@@ -26,6 +26,7 @@ const ATOMIC_SWAP_ABI = [
 
 const ERC20_ABI = ["function approve(address spender,uint256 amount) returns (bool)"];
 
+const WEI_PER_TINYBAR = 10_000_000_000n;
 const INT64_MAX = 9_223_372_036_854_775_807n;
 
 type FlowState = "Discovering" | "Negotiating" | "Executing" | "Settled";
@@ -425,6 +426,7 @@ async function executeAtomicSwapFlow(
     limitPrice,
     config.sellTokenDecimals
   );
+  const hbarAmountWei = hbarAmountTinybars * WEI_PER_TINYBAR;
   const tokenAddress = tokenIdToAddress(requestEnvelope.payload.sellToken);
   const tradeId = toTradeId(requestEnvelope.payload.requestId);
   const now = Math.floor(Date.now() / 1000);
@@ -441,7 +443,7 @@ async function executeAtomicSwapFlow(
     hbarAmountTinybars,
     BigInt(ttlSeconds),
     {
-      value: hbarAmountTinybars,
+      value: hbarAmountWei,
     }
   );
   await initiateTx.wait();

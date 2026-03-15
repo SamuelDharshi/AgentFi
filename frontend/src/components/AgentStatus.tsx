@@ -24,25 +24,25 @@ export function AgentStatusCard() {
   }, []);
 
   if (error) {
-    return <p className="text-sm text-red-700">{error}</p>;
+    return <p className="text-sm text-amber-300">{error}</p>;
   }
 
   return (
-    <section className="rounded-2xl border border-[var(--line)] bg-white/80 p-5 shadow-lg backdrop-blur">
-      <h2 className="text-xl font-semibold text-[var(--ink)]">Agent Network Status</h2>
+    <section className="panel-card p-5">
+      <h2 className="panel-title">Agent Network Status</h2>
       {status ? (
-        <div className="mt-3 space-y-1 text-sm text-[var(--ink)]">
+        <div className="mt-3 space-y-1 text-sm text-slate-200">
           <p>User Agent: {status.userAgentOnline ? "online" : "offline"}</p>
           <p>Market Agent: {status.marketAgentOnline ? "online" : "offline"}</p>
           <p>Hedera Link: {status.hederaConnected ? "connected" : "not configured"}</p>
-          <p>Topic: {status.topicId || "not created"}</p>
+          <p className="font-mono">Topic: {status.topicId || "not created"}</p>
           <p>Negotiation Messages: {status.negotiationCount}</p>
           <p>
             Last Activity: {status.lastMessageAt ? new Date(status.lastMessageAt).toLocaleString() : "No activity yet"}
           </p>
         </div>
       ) : (
-        <p className="mt-3 text-sm text-[var(--muted)]">Loading agent status...</p>
+        <p className="mt-3 text-sm text-slate-400">Loading agent status...</p>
       )}
     </section>
   );

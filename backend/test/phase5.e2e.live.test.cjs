@@ -284,13 +284,15 @@ async function signEnvelope(envelope, privateKeyHex) {
 
 async function runHeadlessOrchestrator(extraEnv, timeoutMs) {
   const backendRoot = path.resolve(__dirname, "..");
-  const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+  const isWindows = process.platform === "win32";
+  const npmCmd = isWindows ? "npm.cmd" : "npm";
 
   return new Promise((resolve, reject) => {
     const child = spawn(npmCmd, ["run", "orchestrate:headless"], {
       cwd: backendRoot,
       env: { ...process.env, ...extraEnv },
-      shell: false,
+      // On Windows, .cmd scripts require a shell launcher.
+      shell: isWindows,
     });
 
     let stdout = "";
@@ -357,11 +359,23 @@ function extractConsensusMeta(rawMsg) {
 async function waitForTopicEnvelope(client, topicId, startedAt, predicate, timeoutMs) {
   return new Promise((resolve, reject) => {
     let done = false;
+    let subscription;
+
+    const cleanup = () => {
+      if (subscription && typeof subscription.unsubscribe === "function") {
+        try {
+          subscription.unsubscribe();
+        } catch {
+          // Best-effort cleanup; timeout/result paths already handle completion.
+        }
+      }
+    };
 
     const finishResolve = (value) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      cleanup();
       resolve(value);
     };
 
@@ -369,6 +383,7 @@ async function waitForTopicEnvelope(client, topicId, startedAt, predicate, timeo
       if (done) return;
       done = true;
       clearTimeout(timer);
+      cleanup();
       reject(err instanceof Error ? err : new Error(String(err)));
     };
 
@@ -378,7 +393,7 @@ async function waitForTopicEnvelope(client, topicId, startedAt, predicate, timeo
       );
     }, timeoutMs);
 
-    new TopicMessageQuery()
+    subscription = new TopicMessageQuery()
       .setTopicId(topicId)
       .setStartTime(startedAt)
       .subscribe(

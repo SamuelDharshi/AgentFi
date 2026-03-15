@@ -1,21 +1,21 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { Orbitron, Share_Tech_Mono } from "next/font/google";
 import "./globals.css";
 
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
+const orbitron = Orbitron({
+  variable: "--font-orbitron",
   subsets: ["latin"],
 });
 
-const plexMono = IBM_Plex_Mono({
-  variable: "--font-plex-mono",
-  weight: ["400", "500"],
+const shareTechMono = Share_Tech_Mono({
+  variable: "--font-share-tech-mono",
+  weight: "400",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "AgentFi OTC Trading System",
-  description: "AI agent-to-agent OTC crypto trading prototype on Hedera",
+  title: "AgentFi Observer Dashboard",
+  description: "Live observer terminal for autonomous OpenClaw OTC agents on Hedera",
 };
 
 export default function RootLayout({
@@ -25,21 +25,27 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${spaceGrotesk.variable} ${plexMono.variable} antialiased`}>
-        <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--bg-soft)]/80 backdrop-blur">
-          <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 md:px-8">
-            <a href="/" className="text-lg font-semibold text-[var(--ink)]">
-              AgentFi
+      <body className={`${orbitron.variable} ${shareTechMono.variable} antialiased`}>
+        <header className="sticky top-0 z-20 border-b border-cyan-400/20 bg-slate-950/85 backdrop-blur">
+          <nav className="mx-auto flex max-w-[1300px] items-center justify-between px-4 py-3 md:px-8">
+            <a href="/" className="font-[var(--font-orbitron)] text-lg text-cyan-200">
+              AgentFi Observer
             </a>
-            <div className="flex gap-3 text-sm">
-              <a href="/chat" className="rounded-md px-2 py-1 text-[var(--ink)] hover:bg-white/60">
-                chat
+            <div className="flex gap-3 text-xs uppercase tracking-[0.22em] text-cyan-300/70">
+              <a href="/" className="rounded-md border border-cyan-400/20 px-3 py-1 hover:bg-cyan-400/10">
+                Dashboard
               </a>
-              <a href="/trade" className="rounded-md px-2 py-1 text-[var(--ink)] hover:bg-white/60">
-                trade
+              <a href="/chat" className="rounded-md border border-cyan-400/20 px-3 py-1 hover:bg-cyan-400/10">
+                Chat
               </a>
-              <a href="/agent-status" className="rounded-md px-2 py-1 text-[var(--ink)] hover:bg-white/60">
-                agent-status
+              <a href="/trade" className="rounded-md border border-cyan-400/20 px-3 py-1 hover:bg-cyan-400/10">
+                Trade
+              </a>
+              <a
+                href="/agent-status"
+                className="rounded-md border border-cyan-400/20 px-3 py-1 hover:bg-cyan-400/10"
+              >
+                Status
               </a>
             </div>
           </nav>

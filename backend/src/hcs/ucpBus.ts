@@ -50,6 +50,21 @@ function encryptionKeyBuffer(): Buffer {
   return crypto.createHash("sha256").update(messageEncryptionKey).digest();
 }
 
+const encryptUcpMessages =
+  (process.env.UCP_ENCRYPTION_ENABLED ?? "true").toLowerCase() !== "false";
+
+function encryptMaybe(text: string): string {
+  if (!encryptUcpMessages) {
+    return text;
+  }
+
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", encryptionKeyBuffer(), iv);
+  const encrypted = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, encrypted]).toString("base64");
+}
+
 // Incoming HCS messages may be either plaintext JSON or AES-256-GCM base64.
 // Try to decrypt first; if that fails, treat as plaintext.
 function decryptMaybe(text: string): string {
@@ -159,9 +174,11 @@ export async function publishProposal(
 
   const signed: CheckoutEnvelope = { ...canonicalEnvelope, signature };
 
+  const encoded = encryptMaybe(JSON.stringify(signed));
+
   await new TopicMessageSubmitTransaction()
     .setTopicId(topicId)
-    .setMessage(JSON.stringify(signed))
+    .setMessage(encoded)
     .execute(client);
 }
 

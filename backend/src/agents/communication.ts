@@ -8,6 +8,16 @@ import {
 } from "../hcs/ucpBus";
 import { TradeMessage, TradePayload } from "../types/messages";
 
+export interface HcsBridgeObservation {
+  sequenceNumber: string;
+  consensusTimestamp: string;
+  sender: string;
+  requestId: string;
+  signatureVerified: boolean;
+  dropped: boolean;
+  reason?: string;
+}
+
 const bus = new EventTarget();
 const encryptionKey = process.env.MESSAGE_ENCRYPTION_KEY || "agentfi-local-encryption-key-32bytes";
 const mockHedera = process.env.MOCK_HEDERA === "true";
@@ -134,20 +144,43 @@ export function receiveTradeRequest(callback: (message: TradeMessage) => void): 
  *
  * Call this once at server startup after the topicId is known.
  */
-export function startHcsBridge(topicId: string): void {
+export function startHcsBridge(
+  topicId: string,
+  onObserved?: (observation: HcsBridgeObservation) => void
+): void {
   if (mockHedera) return; // nothing to bridge in mock mode
 
   subscribeProposals(
     getHcsClient(),
     topicId,
     (msg) => {
+      const requestId = msg.envelope.payload.requestId;
+
       if (!msg.signatureVerified) {
+        onObserved?.({
+          sequenceNumber: msg.sequenceNumber,
+          consensusTimestamp: msg.consensusTimestamp,
+          sender: msg.envelope.sender,
+          requestId,
+          signatureVerified: false,
+          dropped: true,
+          reason: "signature_mismatch",
+        });
         console.warn(
           `[hcsBridge] Dropping unverified message from ${msg.envelope.sender}` +
             ` seq=${msg.sequenceNumber}`
         );
         return;
       }
+
+      onObserved?.({
+        sequenceNumber: msg.sequenceNumber,
+        consensusTimestamp: msg.consensusTimestamp,
+        sender: msg.envelope.sender,
+        requestId,
+        signatureVerified: true,
+        dropped: false,
+      });
 
       const p = msg.envelope.payload;
       const tradePayload: TradePayload = {

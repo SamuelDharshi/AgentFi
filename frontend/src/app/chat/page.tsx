@@ -10,10 +10,12 @@ export default function ChatPage() {
   const [requestId, setRequestId] = useState("");
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 md:px-8">
-      <h1 className="text-3xl font-semibold text-[var(--ink)]">AgentFi Chat Console</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">User -&gt; AI Trading Agent -&gt; HCS Messaging -&gt; Market Agent</p>
-      <p className="mt-2 text-sm text-[var(--ink)]">Latest Request ID: {requestId || "none"}</p>
+    <main className="mx-auto max-w-[1300px] px-4 py-8 md:px-8">
+      <h1 className="font-[var(--font-orbitron)] text-3xl text-slate-100">User Agent Console</h1>
+      <p className="mt-1 text-sm text-slate-300/80">
+        Submit OTC intent to your personal agent and watch market-agent negotiation in real time.
+      </p>
+      <p className="mt-3 text-sm text-cyan-200/90">Latest Request ID: {requestId || "none"}</p>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
         <ChatWindow onNegotiationUpdate={setMessages} onRequestCreated={setRequestId} />

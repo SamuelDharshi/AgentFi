@@ -7,6 +7,10 @@ node_modules/
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+venv/
+.venv/
+env/
+packages/
 
 # ─── Secrets — NEVER commit real keys or credentials ─────────────────────────
 .env
@@ -14,6 +18,13 @@ node_modules/
 .env.development.local
 .env.test.local
 .env.production.local
+# Local config files that can contain secrets
+config.json
+settings.py
+config.local.json
+settings.local.py
+secrets.json
+secrets.py
 # Allow .env.example files (safe placeholder templates)
 !.env.example
 # Local file currently containing real keys — keep out of git
@@ -24,6 +35,17 @@ dist/
 build/
 out/
 .next/
+target/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.exe
+*.dll
+*.so
+*.o
+*.obj
+*.class
 
 # ─── Solidity compiler output ─────────────────────────────────────────────────
 contracts/out/
@@ -42,6 +64,13 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+.eslintcache
+.pytest_cache/
+.cache/
+*.tmp
+*.temp
+tmp/
+temp/
 
 # ─── Testing / Coverage ───────────────────────────────────────────────────────
 coverage/
@@ -56,8 +85,10 @@ ehthumbs.db
 Desktop.ini
 
 # ─── Editor ───────────────────────────────────────────────────────────────────
-.vscode/settings.json
+.vscode/
 .idea/
+*.sublime-project
+*.sublime-workspace
 *.swp
 *.swo
 
@@ -69,3 +100,5 @@ Desktop.ini
 *.key
 *.p12
 *.pfx
+*.jks
+*.keystore

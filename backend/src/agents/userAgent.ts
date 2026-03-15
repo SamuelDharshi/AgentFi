@@ -19,6 +19,8 @@ function parseTradeText(input: string): { side: "BUY" | "SELL"; amount: number; 
 }
 
 export async function analyzeTrade(input: string): Promise<AgentAnalysis> {
+  const isMockMode = process.env.MOCK_HEDERA === "true";
+
   const fallback = {
     slippagePct: 2.3,
     riskScore: 0.42,
@@ -29,6 +31,9 @@ export async function analyzeTrade(input: string): Promise<AgentAnalysis> {
   };
 
   if (!openai) {
+    if (!isMockMode) {
+      throw new Error("OPENAI_API_KEY is required when MOCK_HEDERA=false");
+    }
     return fallback;
   }
 
@@ -55,8 +60,23 @@ export async function analyzeTrade(input: string): Promise<AgentAnalysis> {
 
     const text = response.output_text;
     const parsed = JSON.parse(text) as AgentAnalysis;
+
+    if (
+      !Number.isFinite(parsed.slippagePct) ||
+      !Number.isFinite(parsed.riskScore) ||
+      !Number.isFinite(parsed.recommendedPrice) ||
+      (parsed.strategy !== "OTC" && parsed.strategy !== "DEX") ||
+      typeof parsed.reasoning !== "string"
+    ) {
+      throw new Error("OpenAI response schema validation failed");
+    }
+
     return parsed;
-  } catch {
+  } catch (error) {
+    if (!isMockMode) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Live analysis failed: ${message}`);
+    }
     return fallback;
   }
 }

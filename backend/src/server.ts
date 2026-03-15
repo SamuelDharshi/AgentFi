@@ -1,8 +1,11 @@
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
+import { createServer } from "http";
+import { WebSocket, WebSocketServer } from "ws";
 import { onTradeRequest } from "./agents/marketAgent";
 import {
+  HcsBridgeObservation,
   receiveTradeRequest,
   sendTradeAccept,
   sendTradeExecuted,
@@ -21,23 +24,140 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+type ObserverFlowState = "Discovering" | "Negotiating" | "Executing" | "Settled";
+
+type ObserverEvent =
+  | {
+      type: "snapshot";
+      at: number;
+      flowState: ObserverFlowState;
+      topicId: string | null;
+      lastMessageAt: number | null;
+      negotiationCount: number;
+      activeMarketAgents: string[];
+      messages: TradeMessage[];
+    }
+  | {
+      type: "state";
+      at: number;
+      flowState: ObserverFlowState;
+      reason?: string;
+    }
+  | {
+      type: "trade";
+      at: number;
+      source: "bridge" | "local" | "api";
+      message: TradeMessage;
+    }
+  | {
+      type: "hcs";
+      at: number;
+      observation: HcsBridgeObservation;
+    };
+
 let topicId = process.env.HEDERA_TOPIC_ID || "";
 let lastMessageAt: number | null = null;
 const negotiationLog: TradeMessage[] = [];
 const offers = new Map<string, TradePayload>();
+const wsClients = new Set<WebSocket>();
+const activeMarketAgents = new Set<string>();
+let flowState: ObserverFlowState = "Discovering";
+
+const configuredMarketAgent = (process.env.MARKET_AGENT_EVM_ADDRESS ?? "").trim();
+if (configuredMarketAgent) {
+  activeMarketAgents.add(configuredMarketAgent.toLowerCase());
+}
+
+function emitObserverEvent(event: ObserverEvent): void {
+  const serialized = JSON.stringify(event);
+  for (const client of wsClients) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(serialized);
+    }
+  }
+}
+
+function observerSnapshot(): ObserverEvent {
+  return {
+    type: "snapshot",
+    at: Date.now(),
+    flowState,
+    topicId: topicId || null,
+    lastMessageAt,
+    negotiationCount: negotiationLog.length,
+    activeMarketAgents: Array.from(activeMarketAgents),
+    messages: negotiationLog.slice(-120),
+  };
+}
+
+function setFlowState(next: ObserverFlowState, reason?: string): void {
+  if (next === flowState && !reason) {
+    return;
+  }
+
+  flowState = next;
+  emitObserverEvent({
+    type: "state",
+    at: Date.now(),
+    flowState,
+    reason,
+  });
+}
+
+function inferFlowState(type: TradeMessage["type"]): ObserverFlowState | null {
+  if (type === "TRADE_REQUEST" || type === "TRADE_OFFER") {
+    return "Negotiating";
+  }
+  if (type === "TRADE_ACCEPT") {
+    return "Executing";
+  }
+  if (type === "TRADE_EXECUTED") {
+    return "Settled";
+  }
+  return null;
+}
+
+function appendNegotiationMessage(
+  message: TradeMessage,
+  source: "bridge" | "local" | "api"
+): void {
+  negotiationLog.push(message);
+  if (negotiationLog.length > 500) {
+    negotiationLog.splice(0, negotiationLog.length - 500);
+  }
+
+  lastMessageAt = Date.now();
+
+  if (configuredMarketAgent && message.type !== "TRADE_REQUEST") {
+    activeMarketAgents.add(configuredMarketAgent.toLowerCase());
+  }
+
+  emitObserverEvent({
+    type: "trade",
+    at: Date.now(),
+    source,
+    message,
+  });
+
+  const inferred = inferFlowState(message.type);
+  if (inferred) {
+    setFlowState(inferred);
+  }
+}
 
 receiveTradeRequest(async (message) => {
-  negotiationLog.push(message);
-  lastMessageAt = Date.now();
+  appendNegotiationMessage(message, "bridge");
 
   const offer = await onTradeRequest(topicId, message);
   if (offer) {
     offers.set(offer.requestId, offer);
-    negotiationLog.push({
+    appendNegotiationMessage(
+      {
       type: "TRADE_OFFER",
       payload: offer,
-    });
-    lastMessageAt = Date.now();
+      },
+      "local"
+    );
   }
 });
 
@@ -91,14 +211,17 @@ app.post("/trade", async (req, res) => {
       notes: execution.settlement,
     });
 
-    negotiationLog.push({
-      type: "TRADE_EXECUTED",
-      payload: {
-        ...offer,
-        timestamp: Date.now(),
-        notes: execution.transactionId,
+    appendNegotiationMessage(
+      {
+        type: "TRADE_EXECUTED",
+        payload: {
+          ...offer,
+          timestamp: Date.now(),
+          notes: execution.transactionId,
+        },
       },
-    });
+      "api"
+    );
 
     return res.json({
       executed: execution.executed,
@@ -133,28 +256,68 @@ app.get("/negotiation-log", (_req, res) => {
   res.json(negotiationLog);
 });
 
+app.get("/observer/snapshot", (_req, res) => {
+  res.json(observerSnapshot());
+});
+
 async function bootstrap(): Promise<void> {
   if (!topicId) {
     topicId = await createTopic("AgentFi OTC Negotiation Topic");
   }
+  setFlowState("Discovering", `topic=${topicId}`);
 
   // Bridge live HCS messages into the in-process negotiation bus.
   // No-op when MOCK_HEDERA=true.
-  startHcsBridge(topicId);
+  startHcsBridge(topicId, (observation) => {
+    emitObserverEvent({
+      type: "hcs",
+      at: Date.now(),
+      observation,
+    });
+
+    if (!observation.dropped) {
+      setFlowState(
+        "Negotiating",
+        `hcs seq=${observation.sequenceNumber} verified=${observation.signatureVerified}`
+      );
+    }
+  });
 
   // Start autonomous OpenClaw heartbeat skill when OPENCLAW_AUTONOMOUS=true.
   await startOpenClawAutonomy(topicId);
 
   const port = Number(process.env.PORT || 4000);
-  const server = app.listen(port, () => {
+  const httpServer = createServer(app);
+  const wss = new WebSocketServer({ server: httpServer, path: "/observer" });
+
+  wss.on("connection", (socket) => {
+    wsClients.add(socket);
+    socket.send(JSON.stringify(observerSnapshot()));
+
+    socket.on("close", () => {
+      wsClients.delete(socket);
+    });
+  });
+
+  httpServer.listen(port, () => {
     // eslint-disable-next-line no-console
-    console.log(`AgentFi backend running on port ${port}; topic=${topicId}`);
+    console.log(
+      `AgentFi backend running on port ${port}; topic=${topicId}; observer=ws://localhost:${port}/observer`
+    );
   });
 
   // Graceful shutdown for long-running autonomous skills.
   const shutdown = async () => {
     await stopOpenClawAutonomy();
-    server.close(() => process.exit(0));
+
+    for (const client of wsClients) {
+      client.close();
+    }
+    wsClients.clear();
+
+    wss.close(() => {
+      httpServer.close(() => process.exit(0));
+    });
   };
 
   process.once("SIGINT", () => {

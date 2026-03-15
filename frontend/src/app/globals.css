@@ -1,39 +1,106 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f4efe6;
-  --bg-soft: #f0e7d8;
-  --ink: #1e2a33;
-  --muted: #5f6b73;
-  --line: #d8c9af;
-  --panel: #efe5d5;
-  --accent: #ca5a32;
+  --bg: #030510;
+  --bg-soft: #060a1a;
+  --ink: #d6e7ff;
+  --muted: #8fa3c4;
+  --line: rgba(76, 103, 173, 0.45);
+  --panel: rgba(9, 14, 33, 0.8);
+  --accent: #26e0b6;
 }
 
 @theme inline {
   --color-background: var(--bg);
   --color-foreground: var(--ink);
-  --font-sans: var(--font-space-grotesk);
-  --font-mono: var(--font-plex-mono);
+  --font-sans: var(--font-share-tech-mono);
+  --font-mono: var(--font-share-tech-mono);
 }
 
 body {
   min-height: 100vh;
   color: var(--ink);
-  font-family: var(--font-space-grotesk), sans-serif;
+  font-family: var(--font-share-tech-mono), monospace;
+  letter-spacing: 0.01em;
   background:
-    radial-gradient(circle at 90% 10%, rgba(202, 90, 50, 0.17), transparent 35%),
-    radial-gradient(circle at 10% 90%, rgba(30, 42, 51, 0.12), transparent 32%),
+    radial-gradient(circle at 12% 15%, rgba(52, 124, 255, 0.28), transparent 35%),
+    radial-gradient(circle at 86% 24%, rgba(38, 224, 182, 0.2), transparent 34%),
+    radial-gradient(circle at 50% 105%, rgba(139, 92, 246, 0.16), transparent 50%),
     repeating-linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.4),
-      rgba(255, 255, 255, 0.4) 2px,
-      rgba(244, 239, 230, 0.2) 2px,
-      rgba(244, 239, 230, 0.2) 12px
+      90deg,
+      rgba(39, 57, 97, 0.18),
+      rgba(39, 57, 97, 0.18) 1px,
+      rgba(0, 0, 0, 0) 1px,
+      rgba(0, 0, 0, 0) 22px
     ),
     var(--bg);
 }
 
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.04) 1px,
+    rgba(255, 255, 255, 0) 1px,
+    rgba(255, 255, 255, 0) 3px
+  );
+  opacity: 0.22;
+}
+
 * {
   box-sizing: border-box;
+}
+
+.panel-card {
+  border: 1px solid rgba(56, 83, 145, 0.6);
+  background: linear-gradient(
+      135deg,
+      rgba(32, 45, 79, 0.28),
+      rgba(8, 12, 28, 0.82)
+    ),
+    var(--panel);
+  box-shadow:
+    inset 0 0 0 1px rgba(122, 152, 230, 0.08),
+    0 16px 55px rgba(3, 6, 20, 0.55);
+  border-radius: 16px;
+}
+
+.panel-title {
+  font-family: var(--font-orbitron), sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.92rem;
+  color: #d1def6;
+}
+
+.panel-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(45, 212, 191, 0.35);
+  border-radius: 999px;
+  padding: 0.2rem 0.75rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #7de5cf;
+  background: rgba(45, 212, 191, 0.1);
+}
+
+.panel-chip-wrap {
+  border: 1px solid rgba(56, 83, 145, 0.7);
+  border-radius: 0.75rem;
+  background: rgba(7, 12, 27, 0.75);
+  padding: 0.7rem 0.8rem;
+}
+
+.panel-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.17em;
+  color: #7e93b3;
+  margin-bottom: 0.2rem;
 }
