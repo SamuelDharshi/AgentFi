@@ -1,23 +1,11 @@
 import type { Metadata } from "next";
-import { Orbitron, Share_Tech_Mono } from "next/font/google";
 import { ConnectWallet } from "@/components/ConnectWallet";
 import { WalletProvider } from "@/context/WalletContext";
 import "./globals.css";
 
-const orbitron = Orbitron({
-  variable: "--font-orbitron",
-  subsets: ["latin"],
-});
-
-const shareTechMono = Share_Tech_Mono({
-  variable: "--font-share-tech-mono",
-  weight: "400",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "AgentFi Observer Dashboard",
-  description: "Live observer terminal for autonomous OpenClaw OTC agents on Hedera",
+  title: "AgentFi - AI-Powered OTC Trading",
+  description: "Agent-native OTC trading platform built on Hedera. Let AI agents trade for you.",
 };
 
 export default function RootLayout({
@@ -27,35 +15,39 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${orbitron.variable} ${shareTechMono.variable} antialiased`}>
+      <body className="antialiased">
         <WalletProvider>
-          <header className="sticky top-0 z-20 border-b border-cyan-400/20 bg-slate-950/85 backdrop-blur">
-            <nav className="mx-auto flex max-w-325 items-center justify-between px-4 py-3 md:px-8">
-              <a href="/" className="font-(--font-orbitron) text-lg text-cyan-200">
-                AgentFi Observer
-              </a>
-              <div className="flex items-center gap-3">
-                <div className="flex gap-3 text-xs uppercase tracking-[0.22em] text-cyan-300/70">
-                  <a href="/" className="rounded-md border border-cyan-400/20 px-3 py-1 hover:bg-cyan-400/10">
-                    Dashboard
-                  </a>
-                  <a href="/chat" className="rounded-md border border-cyan-400/20 px-3 py-1 hover:bg-cyan-400/10">
-                    Chat
-                  </a>
-                  <a href="/trade" className="rounded-md border border-cyan-400/20 px-3 py-1 hover:bg-cyan-400/10">
-                    Trade
-                  </a>
-                  <a
-                    href="/agent-status"
-                    className="rounded-md border border-cyan-400/20 px-3 py-1 hover:bg-cyan-400/10"
-                  >
-                    Status
-                  </a>
+          <nav className="fixed top-0 left-0 w-full z-50 border-b border-white/5 bg-black/80 backdrop-blur-xl">
+            <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+              <a href="/" className="flex items-center gap-2 group">
+                <div className="w-8 h-8 bg-[#a855f7] flex items-center justify-center">
+                  <span className="text-black font-black text-xl">A</span>
                 </div>
-                <ConnectWallet />
+                <span className="font-bold tracking-tighter text-xl group-hover:text-[#a855f7] transition-colors">
+                  AGENTFI <span className="text-xs font-mono opacity-50">OBSERVER</span>
+                </span>
+              </a>
+
+              <div className="hidden md:flex items-center gap-1">
+                {[
+                  { name: 'DASHBOARD', path: '/' },
+                  { name: 'CHAT', path: '/chat' },
+                  { name: 'TRADE', path: '/trade' },
+                  { name: 'STATUS', path: '/agent-status' },
+                ].map((item) => (
+                  <a
+                    key={item.path}
+                    href={item.path}
+                    className="px-4 py-2 text-xs font-bold tracking-widest transition-all hover:text-[#a855f7] text-white/60"
+                  >
+                    {item.name}
+                  </a>
+                ))}
               </div>
-            </nav>
-          </header>
+
+              <ConnectWallet />
+            </div>
+          </nav>
           {children}
         </WalletProvider>
       </body>

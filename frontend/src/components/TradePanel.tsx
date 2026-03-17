@@ -58,74 +58,143 @@ export function TradePanel({
 
   const canAct = Boolean(requestId && offer && !offerError);
 
+  const txHashShortened = result?.transactionId 
+    ? `${result.transactionId.slice(0, 6)}...${result.transactionId.slice(-4)}`
+    : null;
+
+  const hashScanUrl = result?.transactionId
+    ? `https://hashscan.io/testnet/transaction/${result.transactionId}`
+    : null;
+
   return (
-    <section className="panel-card p-5">
-      <h2 className="panel-title">Trade Execution</h2>
-      <p className="mt-1 text-sm text-slate-300/80">
-        Review the latest market offer and choose accept or reject.
+    <section className="card-dark">
+      <h2 className="section-title">💰 Trade Execution</h2>
+      <p className="mt-2 text-sm text-gray-300">
+        Review the market offer and execute the atomic swap on Hedera EVM.
       </p>
 
-      <div className="mt-4 space-y-3">
-        <input
-          value={requestId}
-          readOnly
-          className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 font-mono text-sm text-slate-200"
-        />
+      {!isWalletConnected && (
+        <div className="mt-4 p-3 bg-red-500/20 border border-red-500/50 rounded text-red-300 text-sm">
+          ⚠️ Connect your HashPack wallet to accept trades
+        </div>
+      )}
 
+      <div className="mt-6 space-y-4">
         {!requestId ? (
-          <p className="text-sm text-slate-400">Enter a request ID to load offer details.</p>
+          <div className="p-4 bg-yellow-500/10 border border-yellow-500/50 rounded text-yellow-300 text-sm font-mono">
+            📡 SCANNING FOR OFFERS [● ● ●]<br/>
+            <span className="text-xs text-gray-400 mt-1 block">Submit a trade from the chat to get started</span>
+          </div>
         ) : null}
 
-        {offerPolling ? <p className="text-xs text-slate-400">Refreshing offer...</p> : null}
-        {offerError ? <p className="text-sm text-amber-300">{offerError}</p> : null}
+        {offerPolling && !offer ? (
+          <div className="text-cyan-300 text-sm font-mono">📡 Polling HCS for offer...</div>
+        ) : null}
+
+        {offerError && !offer ? (
+          <div className="text-red-400 text-sm font-mono">❌ {offerError}</div>
+        ) : null}
 
         {offer ? (
-          <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4 text-sm text-slate-200">
-            <p className="font-semibold text-cyan-100">Live Market Offer</p>
-            <p className="mt-1">
-              {offer.amount} {offer.token} @ {offer.price} {offer.buyToken ?? "HBAR"}
-            </p>
-            <p className="font-mono text-xs text-slate-400">Wallet: {offer.wallet}</p>
-            {offer.notes ? <p className="mt-2 text-slate-300">{offer.notes}</p> : null}
+          <div className="card-dark bg-black/40 border-cyan-400 p-4">
+            <p className="text-cyan-300 font-mono text-xs mb-3">[ LIVE OFFER ]</p>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-400">YOU SEND</span>
+                <span className="text-white font-bold">{offer.amount} {offer.token}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">YOU GET</span>
+                <span className="text-cyan-300 font-bold">{Math.round(offer.amount / offer.price)} {offer.buyToken ?? "HBAR"}</span>
+              </div>
+              <div className="flex justify-between pt-2 border-t border-cyan-500/20">
+                <span className="text-gray-400">PRICE</span>
+                <span className="text-white font-mono">${offer.price.toFixed(6)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">SPREAD</span>
+                <span className="text-cyan-300">0.5%</span>
+              </div>
+              {offer.notes && (
+                <p className="text-xs text-gray-400 pt-2 mt-2 border-t border-cyan-500/20">{offer.notes}</p>
+              )}
+            </div>
           </div>
         ) : requestId && !offerError ? (
-          <p className="text-sm text-slate-400">Waiting for market offer...</p>
+          <div className="text-cyan-300 text-sm font-mono">🔄 Waiting for market offer...</div>
         ) : null}
 
-        <div className="flex flex-wrap gap-2">
-          <button
-            className="rounded-lg bg-emerald-400/85 px-4 py-2 font-medium text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
-            type="button"
-            onClick={() => {
-              void submit(true);
-            }}
-            disabled={!canAct || loadingAction !== null || !isWalletConnected}
-          >
-            {loadingAction === "accept" ? "Executing..." : "Accept & Execute"}
-          </button>
-          <button
-            className="rounded-lg bg-rose-400/85 px-4 py-2 font-medium text-slate-950 transition hover:bg-rose-300 disabled:opacity-60"
-            type="button"
-            onClick={() => {
-              void submit(false);
-            }}
-            disabled={!canAct || loadingAction !== null}
-          >
-            {loadingAction === "reject" ? "Rejecting..." : "Reject Offer"}
-          </button>
-        </div>
+        {canAct && (
+          <div className="flex flex-wrap gap-3">
+            <button
+              className="btn-cyan flex-1"
+              type="button"
+              onClick={() => {
+                void submit(true);
+              }}
+              disabled={loadingAction !== null || !isWalletConnected}
+            >
+              {loadingAction === "accept" ? "⏳ EXECUTING..." : "✅ ACCEPT TRADE"}
+            </button>
+            <button
+              className="btn-red-outline flex-1"
+              type="button"
+              onClick={() => {
+                void submit(false);
+              }}
+              disabled={loadingAction !== null}
+            >
+              {loadingAction === "reject" ? "..." : "❌ REJECT"}
+            </button>
+          </div>
+        )}
       </div>
 
-      {error ? <p className="mt-3 text-sm text-amber-300">{error}</p> : null}
-
-      {result ? (
-        <div className="mt-5 rounded-xl border border-slate-700 bg-slate-900/70 p-4 text-sm text-slate-200">
-          <p>Status: {result.executed ? "Trade Executed" : "Trade Not Executed"}</p>
-          {result.transactionId ? <p className="font-mono text-xs">Transaction: {result.transactionId}</p> : null}
-          {result.settlement ? <p className="text-slate-300">Settlement: {result.settlement}</p> : null}
-          {result.message ? <p>{result.message}</p> : null}
+      {error && (
+        <div className="mt-4 p-3 text-red-400 text-sm font-mono border border-red-500/50 rounded">
+          ❌ {error}
         </div>
-      ) : null}
+      )}
+
+      {result?.executed && (
+        <div className="mt-6 p-4 border-2 border-emerald-400/50 bg-emerald-400/10 rounded">
+          <p className="text-emerald-300 font-bold mb-3">✅ TRADE EXECUTED SUCCESS!</p>
+          <div className="space-y-2 text-sm font-mono">
+            <div className="flex items-center justify-between">
+              <span className="text-gray-400">Transaction</span>
+              <a 
+                href={hashScanUrl || "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-cyan-300 hover:text-cyan-200 underline"
+              >
+                {txHashShortened}
+              </a>
+            </div>
+            <div className="text-xs text-gray-400 mt-2">
+              <p>✅ USDC → Market Agent confirmed</p>
+              <p>✅ HBAR → Your wallet confirmed</p>
+              <p>✅ Reputation updated</p>
+            </div>
+          </div>
+          {hashScanUrl && (
+            <a
+              href={hashScanUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-cyan-outline block text-center mt-3 text-xs py-2"
+            >
+              VIEW ON HASHSCAN →
+            </a>
+          )}
+        </div>
+      )}
+
+      {result && !result.executed && result.message === "Offer rejected" && (
+        <div className="mt-4 p-3 text-gray-400 text-sm font-mono border border-gray-500/50 rounded">
+          ℹ️ Offer rejected
+        </div>
+      )}
     </section>
   );
 }

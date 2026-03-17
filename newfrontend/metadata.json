@@ -1,0 +1,5 @@
+{
+  "name": "AgentFi",
+  "description": "An agent-native OTC trading platform built on Hedera. Connect your wallet, describe your trade, and let autonomous agents negotiate and execute the best possible terms on your behalf.",
+  "requestFramePermissions": []
+}

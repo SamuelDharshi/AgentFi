@@ -1,0 +1,29 @@
+{
+  "name": "agentfi-monorepo",
+  "version": "1.0.0",
+  "description": "AgentFi - Agent-Native OTC Trading Platform on Hedera",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install && npm install --prefix backend && npm install --prefix contracts && npm install --prefix frontend",
+    "dev": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:contracts": "npm run compile --prefix contracts",
+    "build:all": "npm run build --prefix contracts && npm run build --prefix backend && npm run build --prefix frontend",
+    "build:frontend": "npm run build --prefix frontend",
+    "build:backend": "npm run build --prefix backend",
+    "build:contracts": "npm run compile --prefix contracts",
+    "test:backend": "npm run test:e2e-live --prefix backend",
+    "test:contracts": "npm run test --prefix contracts",
+    "deploy:contracts": "npm run deploy --prefix contracts",
+    "start": "concurrently \"npm start --prefix backend\" \"npm start --prefix frontend\"",
+    "clean": "rimraf backend/dist frontend/.next contracts/typechain-types contracts/artifacts",
+    "setup": "node scripts/setup.js",
+    "verify": "node scripts/quickcheck.js",
+    "help": "echo \"Available commands:\n  npm run install:all - Install dependencies for all projects\n  npm run dev - Start backend & frontend in development mode (port 3000 & 4000)\n  npm run build:all - Build all projects\n  npm run test:backend - Run backend E2E tests\n  npm run deploy:contracts - Deploy smart contracts\n  npm run setup - Run setup wizard\n  npm run verify - Check setup status\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.0.0",
+    "rimraf": "^5.0.0"
+  }
+}

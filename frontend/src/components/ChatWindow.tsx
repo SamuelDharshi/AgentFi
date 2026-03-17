@@ -1,15 +1,30 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useWallet } from "@/context/WalletContext";
 import { ChatResponse, sendChat } from "@/lib/api";
 
 interface ChatWindowProps {
   onNegotiationUpdate: (messages: ChatResponse["negotiation"]) => void;
   onRequestCreated: (requestId: string) => void;
+  onTradeResponse?: (response: ChatResponse) => void;
+  autoRedirectToTrade?: boolean;
 }
 
-export function ChatWindow({ onNegotiationUpdate, onRequestCreated }: ChatWindowProps) {
+const EXAMPLE_PROMPTS = [
+  "Sell 1000 USDC for HBAR",
+  "Sell 500 HBAR for USDC",
+  "Trade 5000 USDC for HBAR",
+];
+
+export function ChatWindow({
+  onNegotiationUpdate,
+  onRequestCreated,
+  onTradeResponse,
+  autoRedirectToTrade = false,
+}: ChatWindowProps) {
+  const router = useRouter();
   const { accountId, isConnected } = useWallet();
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -32,9 +47,22 @@ export function ChatWindow({ onNegotiationUpdate, onRequestCreated }: ChatWindow
       setResponse(data);
       onNegotiationUpdate(data.negotiation);
       onRequestCreated(data.tradeRequest.requestId);
+      onTradeResponse?.(data);
+      
+      // Store in localStorage for reference
       if (typeof window !== "undefined") {
         window.localStorage.setItem("agentfi:lastRequestId", data.tradeRequest.requestId);
+        
+        // Auto-redirect to trade page if requested
+        if (autoRedirectToTrade) {
+          setTimeout(() => {
+            router.push(`/trade?requestId=${data.tradeRequest.requestId}`);
+          }, 1500);
+        }
       }
+      
+      // Clear message after successful submission
+      setMessage("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send message");
     } finally {
@@ -43,50 +71,69 @@ export function ChatWindow({ onNegotiationUpdate, onRequestCreated }: ChatWindow
   }
 
   return (
-    <section className="panel-card p-5">
-      <h2 className="panel-title">User to AI Trading Agent</h2>
-      <p className="mt-1 text-sm text-slate-300/80">
-        Ask your personal agent to negotiate OTC trades over Hedera Consensus Service.
+    <section className="card-dark">
+      <h2 className="section-title">🤖 UserAgent Terminal</h2>
+      <p className="mt-2 text-sm text-gray-300">
+        Submit OTC intent to your personal agent and watch market-agent negotiation in real time.
       </p>
 
-      <p className="mt-2 text-xs text-cyan-200/80">
+      <p className="mt-2 text-xs text-cyan-400 font-mono">
         {isConnected && accountId
-          ? `Connected wallet: ${accountId}`
+          ? `Connected: ${accountId}`
           : "Please connect your wallet first"}
       </p>
 
-      <form className="mt-4 space-y-3" onSubmit={onSubmit}>
+      <form className="mt-6 space-y-4" onSubmit={onSubmit}>
         <textarea
-          className="h-28 w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-slate-200"
+          className="w-full h-32 bg-black/50 border-2 border-cyan-500/50 text-cyan-100 placeholder-cyan-600 p-3 rounded font-mono text-sm focus:border-cyan-400 focus:outline-none transition"
           value={message}
           onChange={(event) => setMessage(event.target.value)}
-          placeholder="Sell 500000 USDC for HBAR"
+          placeholder="e.g. Sell 1000 USDC for HBAR"
           disabled={!isConnected || loading}
           required
         />
+
+        {error && (
+          <div className="text-red-400 text-xs font-mono">⚠️ {error}</div>
+        )}
+
+        {/* Example prompt chips */}
+        <div className="flex flex-wrap gap-2">
+          {EXAMPLE_PROMPTS.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              onClick={() => setMessage(prompt)}
+              disabled={!isConnected || loading}
+              className="btn-cyan-outline text-xs py-1 px-2"
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+
         <button
-          className="rounded-lg bg-cyan-500/85 px-4 py-2 font-medium text-slate-950 transition hover:bg-cyan-400 disabled:opacity-60"
+          className="btn-cyan w-full py-3"
           disabled={loading || !isConnected}
           type="submit"
         >
-          {loading ? "Negotiating..." : "Send to Agent"}
+          {loading ? "⏳ EXECUTING..." : "⚡ EXECUTE"}
         </button>
       </form>
 
-      {error ? <p className="mt-3 text-sm text-amber-300">{error}</p> : null}
-
-      {response ? (
-        <div className="mt-5 rounded-xl border border-slate-700 bg-slate-900/70 p-4 text-sm text-slate-200">
-          <p className="font-semibold text-cyan-100">AI Analysis</p>
-          <p className="mt-1">Exchange slippage: {response.analysis.slippagePct}%</p>
-          <p>OTC recommendation: ${response.analysis.recommendedPrice}</p>
-          <p>Suggested execution: {response.analysis.strategy}</p>
-          <p className="mt-2 text-slate-400">{response.analysis.reasoning}</p>
-          <p className="mt-3 font-mono text-xs text-slate-500">
-            Request ID: {response.tradeRequest.requestId}
-          </p>
+      {response && (
+        <div className="mt-6 pt-4 border-t border-cyan-500/30">
+          <p className="text-xs text-cyan-300 font-mono mb-2">[ AGENT RESPONSE ]</p>
+          <div className="text-sm text-white font-mono space-y-1">
+            <p>✅ Trade Request: {response.tradeRequest.requestId}</p>
+            <p>📊 Amount: {response.tradeRequest.amount} {response.tradeRequest.token}</p>
+            <p>💰 Price: ${response.analysis.recommendedPrice.toFixed(6)}</p>
+            {autoRedirectToTrade && (
+              <p className="text-cyan-300 mt-2">↳ Redirecting to trade page...</p>
+            )}
+          </div>
         </div>
-      ) : null}
+      )}
     </section>
   );
 }

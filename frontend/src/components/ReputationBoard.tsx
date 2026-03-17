@@ -29,9 +29,14 @@ function normaliseAddresses(addresses: string[]): string[] {
   );
 }
 
+function shortenAddresss(addr: string): string {
+  if (!addr || addr.length < 6) return addr;
+  return `${addr.slice(0, 4)}...${addr.slice(-4)}`;
+}
+
 export function ReputationBoard({ marketAgents }: ReputationBoardProps) {
   const [rows, setRows] = useState<ReputationRow[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [missing, setMissing] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const registryAddress = (process.env.NEXT_PUBLIC_ERC8004_REGISTRY_ADDRESS ?? "").trim();
@@ -47,7 +52,7 @@ export function ReputationBoard({ marketAgents }: ReputationBoardProps) {
       if (!registryAddress || !ethers.isAddress(registryAddress)) {
         if (!cancelled) {
           setRows([]);
-          setError("Set NEXT_PUBLIC_ERC8004_REGISTRY_ADDRESS to query live reputation.");
+          setMissing(true);
         }
         return;
       }
@@ -55,11 +60,12 @@ export function ReputationBoard({ marketAgents }: ReputationBoardProps) {
       if (addresses.length === 0) {
         if (!cancelled) {
           setRows([]);
-          setError("No active market agents discovered yet.");
+          setMissing(false);
         }
         return;
       }
 
+      setMissing(false);
       setLoading(true);
       try {
         const provider = new ethers.JsonRpcProvider(rpcUrl);
@@ -79,11 +85,11 @@ export function ReputationBoard({ marketAgents }: ReputationBoardProps) {
 
         if (!cancelled) {
           setRows(data);
-          setError(null);
+          setMissing(false);
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to fetch reputation");
+          setMissing(false);
         }
       } finally {
         if (!cancelled) {
@@ -95,7 +101,7 @@ export function ReputationBoard({ marketAgents }: ReputationBoardProps) {
     void load();
     const timer = setInterval(() => {
       void load();
-    }, 20_000);
+    }, 10_000);
 
     return () => {
       cancelled = true;
@@ -105,38 +111,71 @@ export function ReputationBoard({ marketAgents }: ReputationBoardProps) {
 
   return (
     <section className="panel-card p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="panel-title">ERC-8004 Market Reputation</h2>
-        <span className="panel-chip">live testnet</span>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="panel-title">⭐ Market Agent Reputation</h2>
+        <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-mono text-emerald-300">
+          🟢 LIVE TESTNET
+        </span>
       </div>
 
-      {error ? <p className="text-sm text-amber-300/90">{error}</p> : null}
+      {missing ? (
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-4">
+          <p className="text-sm text-red-300">
+            ❌ Reputation contract not configured
+          </p>
+          <p className="mt-1 text-xs text-red-200/70">
+            Set NEXT_PUBLIC_ERC8004_REGISTRY_ADDRESS in .env.local
+          </p>
+        </div>
+      ) : null}
 
-      <div className="space-y-2">
-        {rows.length === 0 && !error ? (
-          <p className="text-sm text-slate-400">{loading ? "Loading on-chain scores..." : "No data"}</p>
+      <div className="space-y-3">
+        {rows.length === 0 && !missing ? (
+          <div className="text-center py-4">
+            <p className="text-sm text-slate-400">
+              {loading ? "📡 Fetching on-chain scores..." : "Waiting for market agents..."}
+            </p>
+          </div>
         ) : null}
 
         {rows.map((row) => (
-          <article key={row.address} className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-            <p className="font-mono text-xs text-slate-400">{row.address}</p>
-            <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
-              <div>
-                <p className="text-slate-500">Score</p>
-                <p className="text-cyan-100">{row.score.toString()}</p>
+          <article
+            key={row.address}
+            className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4 transition hover:bg-emerald-500/10"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🏆</span>
+                <span className="font-mono text-xs text-emerald-400/80">
+                  {shortenAddresss(row.address)}
+                </span>
               </div>
-              <div>
-                <p className="text-slate-500">Trades</p>
-                <p className="text-cyan-100">{row.tradeCount.toString()}</p>
-              </div>
-              <div>
-                <p className="text-slate-500">Updated</p>
-                <p className="text-cyan-100">
-                  {row.lastUpdatedAt > BigInt(0)
-                    ? new Date(Number(row.lastUpdatedAt) * 1000).toLocaleTimeString()
-                    : "never"}
+              <span className="text-xs text-slate-400">
+                {row.lastUpdatedAt > BigInt(0)
+                  ? `Updated ${new Date(Number(row.lastUpdatedAt) * 1000).toLocaleTimeString()}`
+                  : "No updates yet"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="border-l border-emerald-500/20 pl-3">
+                <p className="text-xs uppercase tracking-wider text-slate-400/70">⭐ Trades Completed</p>
+                <p className="mt-1 text-2xl font-mono text-emerald-300">
+                  {row.tradeCount.toString()}
                 </p>
               </div>
+              <div className="border-l border-emerald-500/20 pl-3">
+                <p className="text-xs uppercase tracking-wider text-slate-400/70">🏆 Trust Score</p>
+                <p className="mt-1 text-2xl font-mono text-emerald-300">
+                  {row.score.toString()}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-slate-700/50">
+              <p className="text-xs text-slate-500 font-mono">
+                📍 {shortenAddresss(row.address)} on Hedera Testnet
+              </p>
             </div>
           </article>
         ))}

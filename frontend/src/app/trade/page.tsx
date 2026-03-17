@@ -1,13 +1,20 @@
 "use client";
 
 import { isAxiosError } from "axios";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { AgentObserver, AgentObserverHandle } from "@/components/AgentObserver";
 import { NegotiationFeed } from "@/components/NegotiationFeed";
+import { ReputationBoard } from "@/components/ReputationBoard";
 import { TradePanel } from "@/components/TradePanel";
 import { useWallet } from "@/context/WalletContext";
 import { TradeMessage, TradePayload, getTradeOffer } from "@/lib/api";
 
 const OFFER_POLL_MS = 3000;
+
+// Market agent addresses: from env + any addresses seen in live HCS feed
+const CONFIGURED_MARKET_AGENT = (
+  process.env.NEXT_PUBLIC_MARKET_AGENT_EVM_ADDRESS ?? ""
+).trim();
 
 export default function TradePage() {
   const { accountId, isConnected } = useWallet();
@@ -16,6 +23,10 @@ export default function TradePage() {
   const [offer, setOffer] = useState<TradePayload | null>(null);
   const [offerPolling, setOfferPolling] = useState(false);
   const [offerError, setOfferError] = useState<string | null>(null);
+  const [marketAgents, setMarketAgents] = useState<string[]>(
+    CONFIGURED_MARKET_AGENT ? [CONFIGURED_MARKET_AGENT] : []
+  );
+  const observerRef = useRef<AgentObserverHandle | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -55,8 +66,19 @@ export default function TradePage() {
         }
 
         setOffer(data.offer);
-        setMessages(data.negotiation ?? []);
+        const msgs = data.negotiation ?? [];
+        setMessages(msgs);
         setOfferError(null);
+
+        // Drive observer from negotiation messages
+        if (msgs.length > 0) {
+          observerRef.current?.onNegotiationMessages(msgs);
+        }
+
+        // Collect market agent addresses from offer
+        if (data.offer?.wallet) {
+          setMarketAgents((prev) => Array.from(new Set([...prev, data.offer.wallet])));
+        }
       } catch (error) {
         if (!active) {
           return;
@@ -118,17 +140,29 @@ export default function TradePage() {
         </p>
       </div>
 
+      {/* Main grid: trade + observer */}
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
-        <TradePanel
-          requestId={requestId}
-          offer={offer}
-          offerPolling={offerPolling}
-          offerError={offerError}
-          walletAccountId={accountId}
-          isWalletConnected={isConnected}
-          onNegotiationUpdate={(items) => setMessages(items || [])}
-        />
-        <NegotiationFeed messages={messages} />
+        <div className="space-y-5">
+          <TradePanel
+            requestId={requestId}
+            offer={offer}
+            offerPolling={offerPolling}
+            offerError={offerError}
+            walletAccountId={accountId}
+            isWalletConnected={isConnected}
+            onNegotiationUpdate={(items) => setMessages(items || [])}
+          />
+          <NegotiationFeed messages={messages} />
+        </div>
+
+        <div className="space-y-5">
+          <AgentObserver
+            controllerRef={observerRef}
+            messages={messages}
+            topicId={null}
+          />
+          <ReputationBoard marketAgents={marketAgents} />
+        </div>
       </div>
     </main>
   );

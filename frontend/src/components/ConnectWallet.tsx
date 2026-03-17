@@ -65,18 +65,18 @@ export function ConnectWallet() {
             void onConnect();
           }}
           disabled={busy}
-          className="rounded-md border border-emerald-300/40 bg-emerald-300/10 px-3 py-1 text-xs uppercase tracking-[0.16em] text-emerald-200 transition hover:bg-emerald-300/20 disabled:opacity-60"
+          className="border border-[#a855f7]/30 px-4 py-2 text-[10px] font-bold tracking-[0.2em] hover:bg-[#a855f7] hover:text-black transition-all disabled:opacity-60"
         >
-          {busy ? "Connecting..." : "Connect Wallet"}
+          {busy ? "CONNECTING..." : "CONNECT WALLET"}
         </button>
-        {error ? <p className="text-xs text-amber-300">{error}</p> : null}
+        {error ? <p className="text-xs text-orange-300">{error}</p> : null}
       </div>
     );
   }
 
   return (
     <div className="flex items-center gap-2">
-      <span className="rounded-md border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100">
+      <span className="border border-[#a855f7]/30 px-4 py-2 text-xs font-mono text-white/60">
         {shortenAccountId(accountId)}
       </span>
       <button
@@ -85,9 +85,9 @@ export function ConnectWallet() {
           void onDisconnect();
         }}
         disabled={busy}
-        className="rounded-md border border-rose-300/35 px-3 py-1 text-xs uppercase tracking-[0.16em] text-rose-200 transition hover:bg-rose-400/10 disabled:opacity-60"
+        className="border border-red-500/30 px-4 py-2 text-[10px] font-bold tracking-[0.2em] text-red-500 hover:bg-red-500/10 transition-all disabled:opacity-60"
       >
-        {busy ? "..." : "Disconnect"}
+        {busy ? "..." : "DISCONNECT"}
       </button>
     </div>
   );
