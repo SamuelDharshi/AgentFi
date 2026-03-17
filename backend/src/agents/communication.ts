@@ -19,13 +19,51 @@ export interface HcsBridgeObservation {
 }
 
 const bus = new EventTarget();
-const encryptionKey = process.env.MESSAGE_ENCRYPTION_KEY || "agentfi-local-encryption-key-32bytes";
-const mockHedera = process.env.MOCK_HEDERA === "true";
-const evmSigningKey = (process.env.HEDERA_OPERATOR_EVM_KEY ?? "").replace(/^0x/i, "");
-const escrowContract = process.env.ATOMIC_SWAP_ADDRESS ?? "";
-const htsTokenId = process.env.HTS_TOKEN_ID ?? "";
+
+function isMockMode(): boolean {
+  return (process.env.MOCK_HEDERA ?? "").toLowerCase() === "true";
+}
+
+function assertLiveMode(): void {
+  if (isMockMode()) {
+    throw new Error(
+      "Live communication is required: set MOCK_HEDERA=false"
+    );
+  }
+}
+
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
+function optionalEnv(name: string): string {
+  return process.env[name]?.trim() || "";
+}
+
+function getEvmSigningKey(): string {
+  return requireEnv("HEDERA_OPERATOR_EVM_KEY").replace(/^0x/i, "");
+}
+
+function resolveSellTokenId(payloadToken: string): string {
+  if (payloadToken.startsWith("0x") || /^0\.0\.\d+$/.test(payloadToken)) {
+    return payloadToken;
+  }
+
+  const configuredToken = optionalEnv("HTS_TOKEN_ID");
+  if (!configuredToken) {
+    throw new Error(
+      `HTS_TOKEN_ID is required for UCP checkout when payload token is symbolic (${payloadToken})`
+    );
+  }
+  return configuredToken;
+}
 
 function keyBuffer(): Buffer {
+  const encryptionKey = requireEnv("MESSAGE_ENCRYPTION_KEY");
   return crypto.createHash("sha256").update(encryptionKey).digest();
 }
 
@@ -48,24 +86,22 @@ function decrypt(cipherText: string): string {
 }
 
 async function publish(topicId: string, message: TradeMessage): Promise<void> {
+  assertLiveMode();
+
   const raw = JSON.stringify(message);
   const encrypted = encrypt(raw);
 
-  if (mockHedera) {
-    // In mock mode, use in-process delivery only.
-    bus.dispatchEvent(new CustomEvent("trade_message", { detail: encrypted }));
-    return; // in-process only — no real HCS submission
-  }
-
   // For TRADE_REQUEST, format as a UCP dev.ucp.trading.checkout envelope
   // and submit to HCS with an EIP-191 sender signature.
-  if (message.type === "TRADE_REQUEST" && evmSigningKey) {
+  if (message.type === "TRADE_REQUEST") {
+    const evmSigningKey = getEvmSigningKey();
+    const escrowContract = requireEnv("ATOMIC_SWAP_ADDRESS");
     const p = message.payload;
     const proposal = buildCheckoutProposal(
       {
         requestId: p.requestId,
         initiatorAccount: /^0\.0\.\d+$/.test(p.wallet) ? p.wallet : undefined,
-        sellToken: htsTokenId || p.token,
+        sellToken: resolveSellTokenId(p.token),
         // Convert human amount (float) to 6-decimal smallest units
         sellAmountSmallestUnit: BigInt(Math.round(p.amount * 1_000_000)),
         buyToken: p.buyToken ?? "HBAR",
@@ -78,6 +114,10 @@ async function publish(topicId: string, message: TradeMessage): Promise<void> {
       p.wallet
     );
     await publishProposal(getHcsClient(), topicId, proposal, evmSigningKey);
+    // eslint-disable-next-line no-console
+    console.log(
+      `✅ TRADE_REQUEST published to HCS topic | topic=${topicId} requestId=${p.requestId}`
+    );
     return;
   }
 
@@ -100,6 +140,11 @@ export async function sendTradeOffer(topicId: string, payload: TradePayload): Pr
     type: "TRADE_OFFER",
     payload,
   });
+
+  // eslint-disable-next-line no-console
+  console.log(
+    `✅ TRADE_OFFER published to HCS topic | topic=${topicId} requestId=${payload.requestId}`
+  );
 }
 
 export async function sendTradeAccept(topicId: string, payload: TradePayload): Promise<void> {
@@ -114,20 +159,43 @@ export async function sendTradeExecuted(topicId: string, payload: TradePayload):
     type: "TRADE_EXECUTED",
     payload,
   });
+
+  // eslint-disable-next-line no-console
+  console.log(
+    `✅ TRADE_EXECUTED published to HCS topic | topic=${topicId} requestId=${payload.requestId}`
+  );
 }
 
-export function receiveTradeRequest(callback: (message: TradeMessage) => void): () => void {
+export function receiveTradeRequest(
+  callback: (message: TradeMessage) => void | Promise<void>
+): () => void {
   const handler = (event: Event) => {
     const custom = event as CustomEvent<string>;
     const decrypted = decrypt(custom.detail);
     const message = JSON.parse(decrypted) as TradeMessage;
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `✅ HCS message received and decrypted | type=${message.type} requestId=${message.payload.requestId}`
+    );
 
     // Reject stale messages over 5 minutes old to prevent replay behavior in demo.
     if (Date.now() - message.payload.timestamp > 5 * 60 * 1000) {
       return;
     }
 
-    callback(message);
+    try {
+      const maybePromise = callback(message);
+      if (maybePromise && typeof (maybePromise as Promise<void>).catch === "function") {
+        void (maybePromise as Promise<void>).catch((error) => {
+          const details = error instanceof Error ? error.message : String(error);
+          console.error(`[communication] message callback failed: ${details}`);
+        });
+      }
+    } catch (error) {
+      const details = error instanceof Error ? error.message : String(error);
+      console.error(`[communication] message callback failed: ${details}`);
+    }
   };
 
   bus.addEventListener("trade_message", handler);
@@ -148,7 +216,7 @@ export function startHcsBridge(
   topicId: string,
   onObserved?: (observation: HcsBridgeObservation) => void
 ): void {
-  if (mockHedera) return; // nothing to bridge in mock mode
+  assertLiveMode();
 
   subscribeProposals(
     getHcsClient(),

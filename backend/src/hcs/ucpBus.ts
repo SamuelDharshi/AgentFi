@@ -43,18 +43,25 @@ function normaliseKey(hex: string): string {
   return "0x" + hex.replace(/^0x/i, "");
 }
 
-const messageEncryptionKey =
-  process.env.MESSAGE_ENCRYPTION_KEY || "agentfi-local-encryption-key-32bytes";
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
 
 function encryptionKeyBuffer(): Buffer {
+  const messageEncryptionKey = requireEnv("MESSAGE_ENCRYPTION_KEY");
   return crypto.createHash("sha256").update(messageEncryptionKey).digest();
 }
 
-const encryptUcpMessages =
-  (process.env.UCP_ENCRYPTION_ENABLED ?? "true").toLowerCase() !== "false";
+function encryptUcpMessagesEnabled(): boolean {
+  return (process.env.UCP_ENCRYPTION_ENABLED ?? "true").toLowerCase() !== "false";
+}
 
 function encryptMaybe(text: string): string {
-  if (!encryptUcpMessages) {
+  if (!encryptUcpMessagesEnabled()) {
     return text;
   }
 
@@ -215,8 +222,9 @@ export function subscribeProposals(
 ): void {
   const query = new TopicMessageQuery().setTopicId(topicId);
 
-  // Default to server start time so we don't replay all historical messages
-  query.setStartTime(startTime ?? new Date());
+  // Default slightly in the past to avoid INVALID_ARGUMENT when local clock is ahead.
+  const defaultStartTime = new Date(Date.now() - 5 * 60 * 1000);
+  query.setStartTime(startTime ?? defaultStartTime);
 
   query.subscribe(
     client,
@@ -278,7 +286,7 @@ export function subscribeProposals(
 
       // ── Log with real consensus timestamp and sequence number ──
       console.log(
-        `[ucpBus] ← seq=${sequenceNumber} ts=${consensusTimestamp}` +
+        `[ucpBus] ✅ received type=TRADE_REQUEST seq=${sequenceNumber} ts=${consensusTimestamp}` +
           ` sender=${envelope.sender} verified=${signatureVerified}` +
           ` id=${envelope.id}`
       );

@@ -61,6 +61,9 @@ contract AtomicSwap {
     /// @dev HTS response code for SUCCESS
     int64 private constant HTS_SUCCESS = 22;
 
+    /// @dev HTS response code for TOKEN_ALREADY_ASSOCIATED_TO_ACCOUNT
+    int64 private constant HTS_TOKEN_ALREADY_ASSOCIATED = 194;
+
     // -------------------------------------------------------------------------
     // Errors
     // -------------------------------------------------------------------------
@@ -74,7 +77,6 @@ contract AtomicSwap {
     error HTSAssociateFailed(int64 code);
     error TradeExpired(bytes32 tradeId, uint256 deadline);
     error WithdrawFailed();
-    error ReputationCallFailed();
 
     // -------------------------------------------------------------------------
     // Events
@@ -157,8 +159,12 @@ contract AtomicSwap {
         // Pre-associate this contract with the HTS token so it can receive it
         IHTSPrecompile hts = IHTSPrecompile(HTS_PRECOMPILE);
         int64 assocCode = hts.associateToken(address(this), htsToken);
-        // 0x16A = 362 = "TOKEN_ALREADY_ASSOCIATED_TO_ACCOUNT" is also acceptable
-        if (assocCode != HTS_SUCCESS && assocCode != 362) {
+        // Accept already-associated responses from different network code variants.
+        if (
+            assocCode != HTS_SUCCESS &&
+            assocCode != HTS_TOKEN_ALREADY_ASSOCIATED &&
+            assocCode != 362
+        ) {
             revert HTSAssociateFailed(assocCode);
         }
 
@@ -230,23 +236,10 @@ contract AtomicSwap {
         if (!sent) revert WithdrawFailed();
 
         // ── Step 4: increment market-agent reputation on ERC-8004 registry ────
-        // Non-reverting: a registry failure must not roll back a settled trade.
         bytes32 ref = keccak256(
             abi.encodePacked(tradeId, trade.marketAgent, trade.user, block.timestamp)
         );
-        try reputationRegistry.incrementReputation(trade.marketAgent, 1, ref) {
-            // success — reputation updated
-        } catch {
-            // Registry call failed (e.g. agent not registered yet).
-            // Trade is already settled — emit event but do not revert.
-            emit TradeExecuted(
-                tradeId,
-                trade.marketAgent,
-                trade.user,
-                "Settled - reputation registry update skipped (agent not registered)"
-            );
-            return;
-        }
+        reputationRegistry.incrementReputation(trade.marketAgent, 1, ref);
 
         emit TradeExecuted(
             tradeId,

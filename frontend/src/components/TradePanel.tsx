@@ -1,60 +1,120 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { TradeExecutionResponse, executeTrade } from "@/lib/api";
+import { useState } from "react";
+import { TradeExecutionResponse, TradePayload, executeTrade } from "@/lib/api";
 
 interface TradePanelProps {
   requestId: string;
+  offer: TradePayload | null;
+  offerPolling: boolean;
+  offerError: string | null;
+  walletAccountId: string | null;
+  isWalletConnected: boolean;
   onNegotiationUpdate: (messages: TradeExecutionResponse["negotiation"]) => void;
 }
 
-export function TradePanel({ requestId, onNegotiationUpdate }: TradePanelProps) {
-  const [accepted, setAccepted] = useState(true);
-  const [loading, setLoading] = useState(false);
+export function TradePanel({
+  requestId,
+  offer,
+  offerPolling,
+  offerError,
+  walletAccountId,
+  isWalletConnected,
+  onNegotiationUpdate,
+}: TradePanelProps) {
+  const [loadingAction, setLoadingAction] = useState<"accept" | "reject" | null>(null);
   const [result, setResult] = useState<TradeExecutionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLoading(true);
+  async function submit(accepted: boolean) {
+    if (!requestId || !offer) {
+      return;
+    }
+
+    if (accepted && !isWalletConnected) {
+      setError("Please connect your wallet to accept trades");
+      return;
+    }
+
+    setLoadingAction(accepted ? "accept" : "reject");
     setError(null);
 
     try {
-      const data = await executeTrade(requestId, accepted);
+      const data = await executeTrade(requestId, accepted, walletAccountId);
       setResult(data);
       onNegotiationUpdate(data.negotiation || []);
+      if (!accepted) {
+        setResult({
+          ...data,
+          message: data.message || "Offer rejected",
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Trade execution failed");
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
     }
   }
+
+  const canAct = Boolean(requestId && offer && !offerError);
 
   return (
     <section className="panel-card p-5">
       <h2 className="panel-title">Trade Execution</h2>
       <p className="mt-1 text-sm text-slate-300/80">
-        Accept a negotiated offer to trigger AtomicSwap settlement on Hedera EVM.
+        Review the latest market offer and choose accept or reject.
       </p>
 
-      <form className="mt-4 space-y-3" onSubmit={submit}>
+      <div className="mt-4 space-y-3">
         <input
           value={requestId}
           readOnly
           className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 font-mono text-sm text-slate-200"
         />
-        <label className="flex items-center gap-2 text-sm text-slate-300">
-          <input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} />
-          Accept market offer
-        </label>
-        <button
-          className="rounded-lg bg-emerald-400/85 px-4 py-2 font-medium text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
-          type="submit"
-          disabled={loading || !requestId}
-        >
-          {loading ? "Executing..." : "Execute Trade"}
-        </button>
-      </form>
+
+        {!requestId ? (
+          <p className="text-sm text-slate-400">Enter a request ID to load offer details.</p>
+        ) : null}
+
+        {offerPolling ? <p className="text-xs text-slate-400">Refreshing offer...</p> : null}
+        {offerError ? <p className="text-sm text-amber-300">{offerError}</p> : null}
+
+        {offer ? (
+          <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4 text-sm text-slate-200">
+            <p className="font-semibold text-cyan-100">Live Market Offer</p>
+            <p className="mt-1">
+              {offer.amount} {offer.token} @ {offer.price} {offer.buyToken ?? "HBAR"}
+            </p>
+            <p className="font-mono text-xs text-slate-400">Wallet: {offer.wallet}</p>
+            {offer.notes ? <p className="mt-2 text-slate-300">{offer.notes}</p> : null}
+          </div>
+        ) : requestId && !offerError ? (
+          <p className="text-sm text-slate-400">Waiting for market offer...</p>
+        ) : null}
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="rounded-lg bg-emerald-400/85 px-4 py-2 font-medium text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
+            type="button"
+            onClick={() => {
+              void submit(true);
+            }}
+            disabled={!canAct || loadingAction !== null || !isWalletConnected}
+          >
+            {loadingAction === "accept" ? "Executing..." : "Accept & Execute"}
+          </button>
+          <button
+            className="rounded-lg bg-rose-400/85 px-4 py-2 font-medium text-slate-950 transition hover:bg-rose-300 disabled:opacity-60"
+            type="button"
+            onClick={() => {
+              void submit(false);
+            }}
+            disabled={!canAct || loadingAction !== null}
+          >
+            {loadingAction === "reject" ? "Rejecting..." : "Reject Offer"}
+          </button>
+        </div>
+      </div>
 
       {error ? <p className="mt-3 text-sm text-amber-300">{error}</p> : null}
 

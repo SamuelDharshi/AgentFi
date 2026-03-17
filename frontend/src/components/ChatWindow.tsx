@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { useWallet } from "@/context/WalletContext";
 import { ChatResponse, sendChat } from "@/lib/api";
 
 interface ChatWindowProps {
@@ -9,22 +10,31 @@ interface ChatWindowProps {
 }
 
 export function ChatWindow({ onNegotiationUpdate, onRequestCreated }: ChatWindowProps) {
-  const [wallet, setWallet] = useState("0.0.5005");
-  const [message, setMessage] = useState("Sell 500000 USDC for HBAR");
+  const { accountId, isConnected } = useWallet();
+  const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<ChatResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!isConnected || !accountId) {
+      setError("Please connect your wallet first");
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      const data = await sendChat(message, wallet);
+      const data = await sendChat(message, accountId);
       setResponse(data);
       onNegotiationUpdate(data.negotiation);
       onRequestCreated(data.tradeRequest.requestId);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("agentfi:lastRequestId", data.tradeRequest.requestId);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send message");
     } finally {
@@ -39,24 +49,24 @@ export function ChatWindow({ onNegotiationUpdate, onRequestCreated }: ChatWindow
         Ask your personal agent to negotiate OTC trades over Hedera Consensus Service.
       </p>
 
+      <p className="mt-2 text-xs text-cyan-200/80">
+        {isConnected && accountId
+          ? `Connected wallet: ${accountId}`
+          : "Please connect your wallet first"}
+      </p>
+
       <form className="mt-4 space-y-3" onSubmit={onSubmit}>
-        <input
-          className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-slate-200"
-          value={wallet}
-          onChange={(event) => setWallet(event.target.value)}
-          placeholder="Wallet account id"
-          required
-        />
         <textarea
           className="h-28 w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-slate-200"
           value={message}
           onChange={(event) => setMessage(event.target.value)}
           placeholder="Sell 500000 USDC for HBAR"
+          disabled={!isConnected || loading}
           required
         />
         <button
           className="rounded-lg bg-cyan-500/85 px-4 py-2 font-medium text-slate-950 transition hover:bg-cyan-400 disabled:opacity-60"
-          disabled={loading}
+          disabled={loading || !isConnected}
           type="submit"
         >
           {loading ? "Negotiating..." : "Send to Agent"}

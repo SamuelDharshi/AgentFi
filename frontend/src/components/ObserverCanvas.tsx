@@ -137,7 +137,7 @@ export function ObserverCanvas() {
   }, []);
 
   return (
-    <div className="panel-card h-[320px] overflow-hidden p-0 md:h-[420px]">
+    <div className="panel-card h-80 overflow-hidden p-0 md:h-105">
       <div ref={mountRef} className="h-full w-full" />
     </div>
   );

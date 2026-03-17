@@ -60,7 +60,7 @@ function stripTrailingSlash(value: string): string {
 
 export function backendHttpUrl(): string {
   return stripTrailingSlash(
-    process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000"
+    process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001"
   );
 }
 

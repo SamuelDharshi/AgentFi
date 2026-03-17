@@ -8,7 +8,6 @@ import {
   ObserverFlowState,
   ObserverHcsEvent,
   ObserverStateEvent,
-  ObserverTradeEvent,
   backendWsUrl,
   configuredMarketAgentAddresses,
   getObserverSnapshot,
@@ -219,12 +218,12 @@ export function ObserverDashboard() {
   }, [wsStatus]);
 
   return (
-    <main className="mx-auto max-w-[1300px] px-4 pb-8 pt-6 md:px-8">
+    <main className="mx-auto max-w-325 px-4 pb-8 pt-6 md:px-8">
       <section className="mb-6 rounded-2xl border border-cyan-400/30 bg-slate-950/70 p-6 shadow-[0_0_80px_rgba(8,145,178,0.15)] backdrop-blur">
         <p className="font-mono text-xs uppercase tracking-[0.26em] text-cyan-300/90">
           Autonomous Society Observer Dashboard
         </p>
-        <h1 className="mt-2 font-[var(--font-orbitron)] text-3xl text-slate-100 md:text-4xl">
+        <h1 className="mt-2 font-(--font-orbitron) text-3xl text-slate-100 md:text-4xl">
           AgentFi Terminal
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-slate-300/80 md:text-base">
@@ -271,7 +270,7 @@ export function ObserverDashboard() {
           <span className="panel-chip">ws /observer</span>
         </div>
 
-        <div className="max-h-[380px] space-y-2 overflow-y-auto pr-1">
+        <div className="max-h-95 space-y-2 overflow-y-auto pr-1">
           {feed.length === 0 ? (
             <p className="text-sm text-slate-400">Waiting for stream events...</p>
           ) : (

@@ -7,20 +7,34 @@ export function AgentStatusCard() {
   const [status, setStatus] = useState<AgentStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
-    try {
-      const data = await getAgentStatus();
-      setStatus(data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch status");
-    }
-  }
-
   useEffect(() => {
-    load();
-    const interval = setInterval(load, 5000);
-    return () => clearInterval(interval);
+    let active = true;
+
+    const load = async () => {
+      try {
+        const data = await getAgentStatus();
+        if (!active) return;
+        setStatus(data);
+        setError(null);
+      } catch (err) {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : "Failed to fetch status");
+      }
+    };
+
+    const kickoff = window.setTimeout(() => {
+      void load();
+    }, 0);
+
+    const interval = window.setInterval(() => {
+      void load();
+    }, 5000);
+
+    return () => {
+      active = false;
+      window.clearTimeout(kickoff);
+      window.clearInterval(interval);
+    };
   }, []);
 
   if (error) {

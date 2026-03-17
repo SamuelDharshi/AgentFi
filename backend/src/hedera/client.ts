@@ -10,32 +10,61 @@ import {
 
 type MessageHandler = (message: string) => void;
 
-const network = process.env.HEDERA_NETWORK || "testnet";
-const operatorId = process.env.HEDERA_OPERATOR_ID;
-const operatorKey = process.env.HEDERA_OPERATOR_KEY;
-const mockHedera = process.env.MOCK_HEDERA === "true";
-
 let client: Client | null = null;
+let clientCacheKey = "";
+
+function isMockMode(): boolean {
+  return (process.env.MOCK_HEDERA ?? "").toLowerCase() === "true";
+}
+
+function assertLiveMode(): void {
+  if (isMockMode()) {
+    throw new Error("Live Hedera client required: set MOCK_HEDERA=false");
+  }
+}
+
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
+function resolveConfig(): {
+  network: string;
+  operatorId: string;
+  operatorKey: string;
+} {
+  assertLiveMode();
+
+  const network = (process.env.HEDERA_NETWORK ?? "testnet").trim().toLowerCase();
+  if (network !== "testnet" && network !== "mainnet") {
+    throw new Error(`Unsupported HEDERA_NETWORK value: ${network}`);
+  }
+
+  return {
+    network,
+    operatorId: requireEnv("HEDERA_OPERATOR_ID"),
+    operatorKey: requireEnv("HEDERA_OPERATOR_KEY"),
+  };
+}
 
 function getClient(): Client {
-  if (client) {
+  const config = resolveConfig();
+  const cacheKey = `${config.network}|${config.operatorId}|${config.operatorKey}`;
+
+  if (client && clientCacheKey === cacheKey) {
     return client;
   }
 
-  if (!operatorId || !operatorKey) {
-    throw new Error("Missing HEDERA_OPERATOR_ID or HEDERA_OPERATOR_KEY");
-  }
-
-  client = network === "mainnet" ? Client.forMainnet() : Client.forTestnet();
-  client.setOperator(operatorId, PrivateKey.fromStringDer(operatorKey));
+  client = config.network === "mainnet" ? Client.forMainnet() : Client.forTestnet();
+  client.setOperator(config.operatorId, PrivateKey.fromStringDer(config.operatorKey));
+  clientCacheKey = cacheKey;
   return client;
 }
 
 export async function createTopic(memo = "AgentFi OTC Topic"): Promise<string> {
-  if (mockHedera) {
-    return "0.0.mock-topic";
-  }
-
   const activeClient = getClient();
   const tx = await new TopicCreateTransaction().setTopicMemo(memo).execute(activeClient);
   const receipt = await tx.getReceipt(activeClient);
@@ -48,10 +77,6 @@ export async function createTopic(memo = "AgentFi OTC Topic"): Promise<string> {
 }
 
 export async function submitMessage(topicId: string, message: string): Promise<void> {
-  if (mockHedera) {
-    return;
-  }
-
   const activeClient = getClient();
   await new TopicMessageSubmitTransaction()
     .setTopicId(topicId)
@@ -60,10 +85,6 @@ export async function submitMessage(topicId: string, message: string): Promise<v
 }
 
 export async function subscribeTopic(topicId: string, handler: MessageHandler): Promise<void> {
-  if (mockHedera) {
-    return;
-  }
-
   const activeClient = getClient();
   new TopicMessageQuery()
     .setTopicId(topicId)
@@ -78,10 +99,6 @@ export async function subscribeTopic(topicId: string, handler: MessageHandler): 
 }
 
 export async function transferHBAR(fromAccountId: string, toAccountId: string, amountHbar: number): Promise<string> {
-  if (mockHedera) {
-    return `mock-transfer-${Date.now()}`;
-  }
-
   const activeClient = getClient();
   const tx = await new TransferTransaction()
     .addHbarTransfer(fromAccountId, new Hbar(-amountHbar))
@@ -93,11 +110,10 @@ export async function transferHBAR(fromAccountId: string, toAccountId: string, a
 }
 
 export function isHederaConfigured(): boolean {
-  if (mockHedera) {
-    return true;
+  if (isMockMode()) {
+    return false;
   }
-
-  return Boolean(operatorId && operatorKey);
+  return Boolean(process.env.HEDERA_OPERATOR_ID?.trim() && process.env.HEDERA_OPERATOR_KEY?.trim());
 }
 
 /**

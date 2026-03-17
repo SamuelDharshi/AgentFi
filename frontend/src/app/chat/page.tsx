@@ -10,8 +10,8 @@ export default function ChatPage() {
   const [requestId, setRequestId] = useState("");
 
   return (
-    <main className="mx-auto max-w-[1300px] px-4 py-8 md:px-8">
-      <h1 className="font-[var(--font-orbitron)] text-3xl text-slate-100">User Agent Console</h1>
+    <main className="mx-auto max-w-325 px-4 py-8 md:px-8">
+      <h1 className="font-(--font-orbitron) text-3xl text-slate-100">User Agent Console</h1>
       <p className="mt-1 text-sm text-slate-300/80">
         Submit OTC intent to your personal agent and watch market-agent negotiation in real time.
       </p>

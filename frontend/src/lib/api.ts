@@ -37,6 +37,11 @@ export interface TradeExecutionResponse {
   negotiation?: TradeMessage[];
 }
 
+export interface TradeOfferResponse {
+  offer: TradePayload;
+  negotiation: TradeMessage[];
+}
+
 export interface AgentStatusResponse {
   userAgentOnline: boolean;
   marketAgentOnline: boolean;
@@ -47,16 +52,40 @@ export interface AgentStatusResponse {
 }
 
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000",
+  baseURL: process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001",
 });
 
-export async function sendChat(message: string, wallet: string): Promise<ChatResponse> {
-  const response = await api.post<ChatResponse>("/chat", { message, wallet });
+export async function sendChat(
+  message: string,
+  walletAddress: string
+): Promise<ChatResponse> {
+  const response = await api.post<ChatResponse>("/chat", {
+    message,
+    walletAddress,
+    // Preserve existing backend compatibility.
+    wallet: walletAddress,
+  });
   return response.data;
 }
 
-export async function executeTrade(requestId: string, accepted: boolean): Promise<TradeExecutionResponse> {
-  const response = await api.post<TradeExecutionResponse>("/trade", { requestId, accepted });
+export async function executeTrade(
+  requestId: string,
+  accepted: boolean,
+  walletAddress?: string | null
+): Promise<TradeExecutionResponse> {
+  const response = await api.post<TradeExecutionResponse>("/trade", {
+    requestId,
+    accepted,
+    walletAddress: walletAddress ?? undefined,
+    wallet: walletAddress ?? undefined,
+  });
+  return response.data;
+}
+
+export async function getTradeOffer(requestId: string): Promise<TradeOfferResponse> {
+  const response = await api.get<TradeOfferResponse>("/trade/offer", {
+    params: { requestId },
+  });
   return response.data;
 }
 

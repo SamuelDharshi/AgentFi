@@ -16,9 +16,23 @@ const ATOMIC_SWAP_ABI = [
   "function initiateTrade(bytes32 tradeId,address user,address htsToken,int64 tokenAmount,uint256 hbarAmountTinybars,uint256 ttlSeconds) payable",
   "function executeTrade(bytes32 tradeId)",
   "function cancelTrade(bytes32 tradeId)",
+  "function reputationRegistry() view returns (address)",
 ];
 
 const ERC20_ABI = ["function approve(address spender,uint256 amount) returns (bool)"];
+const ERC8004_REGISTRY_ABI = [
+  "function getReputation(address agent) view returns (tuple(uint256 score,uint256 tradeCount,uint256 lastUpdatedAt))",
+];
+
+interface ReputationRecord {
+  score: bigint;
+  tradeCount: bigint;
+  lastUpdatedAt: bigint;
+}
+
+interface ReputationSnapshot extends ReputationRecord {
+  registryAddress: string;
+}
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -103,6 +117,25 @@ function resolveExecutionConfig() {
   };
 }
 
+async function fetchReputationSnapshot(
+  atomicSwapContract: ethers.Contract,
+  provider: ethers.JsonRpcProvider,
+  marketAddress: string
+): Promise<ReputationSnapshot> {
+  const registryAddress = ethers.getAddress(
+    (await atomicSwapContract.reputationRegistry()) as string
+  );
+  const registry = new ethers.Contract(registryAddress, ERC8004_REGISTRY_ABI, provider);
+  const reputation = (await registry.getReputation(marketAddress)) as unknown as ReputationRecord;
+
+  return {
+    registryAddress,
+    score: BigInt(reputation.score),
+    tradeCount: BigInt(reputation.tradeCount),
+    lastUpdatedAt: BigInt(reputation.lastUpdatedAt),
+  };
+}
+
 export async function executeTrade(trade: TradePayload): Promise<ExecutionResult> {
   if ((trade.buyToken ?? "HBAR").toUpperCase() !== "HBAR") {
     throw new Error("Only HBAR buy-side settlement is currently supported");
@@ -175,6 +208,7 @@ export async function executeTrade(trade: TradePayload): Promise<ExecutionResult
   let approveHash = "";
   let executeHash = "";
   let initiated = false;
+  let reputationBefore: ReputationSnapshot | null = null;
 
   try {
     const initiateTx = await atomicSwapAsMarket.initiateTrade(
@@ -198,9 +232,21 @@ export async function executeTrade(trade: TradePayload): Promise<ExecutionResult
     approveHash = approveTx.hash;
     await approveTx.wait();
 
+    reputationBefore = await fetchReputationSnapshot(
+      atomicSwapAsMarket,
+      provider,
+      marketSigner.address
+    );
+
     const executeTx = await atomicSwapAsUser.executeTrade(tradeId);
     executeHash = executeTx.hash;
+    // eslint-disable-next-line no-console
+    console.log(`✅ AtomicSwap.executeTrade() transaction sent | tx=${executeHash}`);
     await executeTx.wait();
+    // eslint-disable-next-line no-console
+    console.log("✅ USDC transfer confirmed");
+    // eslint-disable-next-line no-console
+    console.log("✅ HBAR transfer confirmed");
   } catch (error) {
     if (initiated) {
       try {
@@ -215,6 +261,33 @@ export async function executeTrade(trade: TradePayload): Promise<ExecutionResult
     throw new Error(`AtomicSwap execution failed: ${message}`);
   }
 
+  if (!reputationBefore) {
+    throw new Error("AtomicSwap execution failed: missing pre-trade reputation snapshot");
+  }
+
+  const reputationAfter = await fetchReputationSnapshot(
+    atomicSwapAsMarket,
+    provider,
+    marketSigner.address
+  );
+
+  if (
+    reputationAfter.tradeCount < reputationBefore.tradeCount + 1n ||
+    reputationAfter.score < reputationBefore.score + 1n
+  ) {
+    throw new Error(
+      "AtomicSwap execution failed: reputation did not increment as required by ERC-8004"
+    );
+  }
+
+  // eslint-disable-next-line no-console
+  console.log("✅ incrementReputation() confirmed");
+
+  const reputationSummary =
+    `reputationRegistry=${reputationAfter.registryAddress}` +
+    ` score=${reputationBefore.score.toString()}->${reputationAfter.score.toString()}` +
+    ` trades=${reputationBefore.tradeCount.toString()}->${reputationAfter.tradeCount.toString()}`;
+
   return {
     executed: true,
     transactionId: executeHash,
@@ -222,6 +295,7 @@ export async function executeTrade(trade: TradePayload): Promise<ExecutionResult
       `AtomicSwap settled on Hedera EVM` +
       ` | initiate=${initiateHash}` +
       ` | approve=${approveHash}` +
-      ` | execute=${executeHash}`,
+      ` | execute=${executeHash}` +
+      ` | ${reputationSummary}`,
   };
 }

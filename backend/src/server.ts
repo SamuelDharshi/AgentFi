@@ -1,5 +1,5 @@
+import "dotenv/config";
 import cors from "cors";
-import dotenv from "dotenv";
 import express from "express";
 import { createServer } from "http";
 import { WebSocket, WebSocketServer } from "ws";
@@ -17,8 +17,6 @@ import { createTopic, isHederaConfigured } from "./hedera/client";
 import { startOpenClawAutonomy, stopOpenClawAutonomy } from "./openclaw";
 import { executeTrade } from "./trade/executor";
 import { AgentStatus, TradeMessage, TradePayload } from "./types/messages";
-
-dotenv.config();
 
 const app = express();
 app.use(cors());
@@ -55,7 +53,7 @@ type ObserverEvent =
       observation: HcsBridgeObservation;
     };
 
-let topicId = process.env.HEDERA_TOPIC_ID || "";
+let topicId = "";
 let lastMessageAt: number | null = null;
 const negotiationLog: TradeMessage[] = [];
 const offers = new Map<string, TradePayload>();
@@ -63,9 +61,8 @@ const wsClients = new Set<WebSocket>();
 const activeMarketAgents = new Set<string>();
 let flowState: ObserverFlowState = "Discovering";
 
-const configuredMarketAgent = (process.env.MARKET_AGENT_EVM_ADDRESS ?? "").trim();
-if (configuredMarketAgent) {
-  activeMarketAgents.add(configuredMarketAgent.toLowerCase());
+function configuredMarketAgentAddress(): string {
+  return (process.env.MARKET_AGENT_EVM_ADDRESS ?? "").trim().toLowerCase();
 }
 
 function emitObserverEvent(event: ObserverEvent): void {
@@ -117,10 +114,42 @@ function inferFlowState(type: TradeMessage["type"]): ObserverFlowState | null {
   return null;
 }
 
+function isDuplicateNegotiationMessage(message: TradeMessage): boolean {
+  // We scan only the recent tail because duplicates are immediate HCS echoes.
+  const recentWindowStart = Math.max(0, negotiationLog.length - 100);
+  for (let i = negotiationLog.length - 1; i >= recentWindowStart; i -= 1) {
+    const existing = negotiationLog[i];
+    if (existing.type !== message.type) {
+      continue;
+    }
+
+    const a = existing.payload;
+    const b = message.payload;
+    if (
+      a.requestId === b.requestId &&
+      a.wallet === b.wallet &&
+      a.token === b.token &&
+      a.amount === b.amount &&
+      a.price === b.price &&
+      (a.buyToken ?? "") === (b.buyToken ?? "") &&
+      a.timestamp === b.timestamp &&
+      (a.notes ?? "") === (b.notes ?? "")
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function appendNegotiationMessage(
   message: TradeMessage,
   source: "bridge" | "local" | "api"
 ): void {
+  if (isDuplicateNegotiationMessage(message)) {
+    return;
+  }
+
   negotiationLog.push(message);
   if (negotiationLog.length > 500) {
     negotiationLog.splice(0, negotiationLog.length - 500);
@@ -128,8 +157,9 @@ function appendNegotiationMessage(
 
   lastMessageAt = Date.now();
 
+  const configuredMarketAgent = configuredMarketAgentAddress();
   if (configuredMarketAgent && message.type !== "TRADE_REQUEST") {
-    activeMarketAgents.add(configuredMarketAgent.toLowerCase());
+    activeMarketAgents.add(configuredMarketAgent);
   }
 
   emitObserverEvent({
@@ -145,26 +175,44 @@ function appendNegotiationMessage(
   }
 }
 
-receiveTradeRequest(async (message) => {
-  appendNegotiationMessage(message, "bridge");
+function getNegotiationForRequest(requestId: string): TradeMessage[] {
+  return negotiationLog.filter((entry) => entry.payload.requestId === requestId);
+}
 
-  const offer = await onTradeRequest(topicId, message);
-  if (offer) {
-    offers.set(offer.requestId, offer);
-    appendNegotiationMessage(
-      {
-      type: "TRADE_OFFER",
-      payload: offer,
-      },
-      "local"
-    );
+receiveTradeRequest(async (message) => {
+  try {
+    appendNegotiationMessage(message, "bridge");
+
+    const offer = await onTradeRequest(topicId, message);
+    if (offer) {
+      offers.set(offer.requestId, offer);
+      appendNegotiationMessage(
+        {
+          type: "TRADE_OFFER",
+          payload: offer,
+        },
+        "local"
+      );
+    }
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    // eslint-disable-next-line no-console
+    console.error(`Failed to process trade request message: ${details}`);
   }
 });
 
 app.post("/chat", async (req, res) => {
   try {
-    const userText = String(req.body.message || "");
-    const wallet = String(req.body.wallet || "0.0.5005");
+    const userText = String(req.body.message ?? "").trim();
+    const wallet = String(req.body.walletAddress ?? req.body.wallet ?? "").trim();
+
+    if (!userText) {
+      return res.status(400).json({ error: "message is required" });
+    }
+
+    if (!wallet) {
+      return res.status(400).json({ error: "wallet is required" });
+    }
 
     const { payload, analysis } = await buildTradeRequest(userText, wallet);
     await sendTradeRequest(topicId, payload);
@@ -173,7 +221,7 @@ app.post("/chat", async (req, res) => {
       message: "Trade request created and sent to market agent",
       analysis,
       tradeRequest: payload,
-      negotiation: negotiationLog,
+      negotiation: getNegotiationForRequest(payload.requestId),
     });
   } catch (error) {
     res.status(500).json({
@@ -185,49 +233,82 @@ app.post("/chat", async (req, res) => {
 
 app.post("/trade", async (req, res) => {
   try {
-    const requestId = String(req.body.requestId || "");
-    const accepted = Boolean(req.body.accepted);
+    const requestId = String(req.body.requestId ?? "").trim();
+    const acceptedRaw = req.body.accepted;
+    const walletAddress = String(req.body.walletAddress ?? req.body.wallet ?? "").trim();
+
+    if (!requestId) {
+      return res.status(400).json({ error: "requestId is required" });
+    }
+
+    if (typeof acceptedRaw !== "boolean") {
+      return res.status(400).json({ error: "accepted must be a boolean" });
+    }
+
+    const accepted = acceptedRaw;
 
     const offer = offers.get(requestId);
     if (!offer) {
       return res.status(404).json({ error: "Offer not found" });
     }
 
-    if (!accepted) {
-      return res.json({ executed: false, message: "Trade declined by user" });
+    if (accepted && !walletAddress) {
+      return res.status(400).json({ error: "walletAddress is required when accepted=true" });
     }
 
-    await sendTradeAccept(topicId, {
+    if (accepted && walletAddress && walletAddress.toLowerCase() !== offer.wallet.toLowerCase()) {
+      return res.status(403).json({ error: "walletAddress does not match offer wallet" });
+    }
+
+    if (!accepted) {
+      offers.delete(requestId);
+      return res.json({
+        executed: false,
+        message: "Trade declined by user",
+        negotiation: getNegotiationForRequest(requestId),
+      });
+    }
+
+    const acceptedPayload: TradePayload = {
       ...offer,
       timestamp: Date.now(),
       notes: "User accepted market offer",
-    });
+    };
+
+    await sendTradeAccept(topicId, acceptedPayload);
+    appendNegotiationMessage(
+      {
+        type: "TRADE_ACCEPT",
+        payload: acceptedPayload,
+      },
+      "api"
+    );
 
     const execution = await executeTrade(offer);
 
-    await sendTradeExecuted(topicId, {
+    const executedPayload: TradePayload = {
       ...offer,
       timestamp: Date.now(),
       notes: execution.settlement,
-    });
+    };
+
+    await sendTradeExecuted(topicId, executedPayload);
 
     appendNegotiationMessage(
       {
         type: "TRADE_EXECUTED",
-        payload: {
-          ...offer,
-          timestamp: Date.now(),
-          notes: execution.transactionId,
-        },
+        payload: executedPayload,
       },
       "api"
     );
+
+    offers.delete(requestId);
 
     return res.json({
       executed: execution.executed,
       transactionId: execution.transactionId,
       settlement: execution.settlement,
-      negotiation: negotiationLog,
+      negotiation: getNegotiationForRequest(requestId),
     });
   } catch (error) {
     return res.status(500).json({
@@ -235,6 +316,26 @@ app.post("/trade", async (req, res) => {
       details: error instanceof Error ? error.message : "Unknown error",
     });
   }
+});
+
+app.get("/trade/offer", (req, res) => {
+  const requestId = String(req.query.requestId ?? "").trim();
+  if (!requestId) {
+    return res.status(400).json({ error: "requestId query param is required" });
+  }
+
+  const offer = offers.get(requestId);
+  if (!offer) {
+    return res.status(404).json({ error: "Offer not found" });
+  }
+
+  // eslint-disable-next-line no-console
+  console.log(`Frontend offer polling returned offer | requestId=${requestId}`);
+
+  return res.json({
+    offer,
+    negotiation: getNegotiationForRequest(requestId),
+  });
 });
 
 app.get("/agent-status", (_req, res) => {
@@ -261,10 +362,16 @@ app.get("/observer/snapshot", (_req, res) => {
 });
 
 async function bootstrap(): Promise<void> {
-  if (!topicId) {
-    topicId = await createTopic("AgentFi OTC Negotiation Topic");
+  const configuredMarketAgent = configuredMarketAgentAddress();
+  if (configuredMarketAgent) {
+    activeMarketAgents.add(configuredMarketAgent);
   }
+
+  topicId = await createTopic("AgentFi OTC Negotiation Topic");
   setFlowState("Discovering", `topic=${topicId}`);
+
+  // eslint-disable-next-line no-console
+  console.log(`✅ Connected to Hedera ${process.env.HEDERA_NETWORK ?? "testnet"}`);
 
   // Bridge live HCS messages into the in-process negotiation bus.
   // No-op when MOCK_HEDERA=true.
@@ -283,10 +390,13 @@ async function bootstrap(): Promise<void> {
     }
   });
 
+  // eslint-disable-next-line no-console
+  console.log(`✅ HCS topic subscribed: ${topicId}`);
+
   // Start autonomous OpenClaw heartbeat skill when OPENCLAW_AUTONOMOUS=true.
   await startOpenClawAutonomy(topicId);
 
-  const port = Number(process.env.PORT || 4000);
+  const port = Number(process.env.PORT || 3001);
   const httpServer = createServer(app);
   const wss = new WebSocketServer({ server: httpServer, path: "/observer" });
 
@@ -300,6 +410,8 @@ async function bootstrap(): Promise<void> {
   });
 
   httpServer.listen(port, () => {
+    // eslint-disable-next-line no-console
+    console.log(`✅ Server running on port ${port}`);
     // eslint-disable-next-line no-console
     console.log(
       `AgentFi backend running on port ${port}; topic=${topicId}; observer=ws://localhost:${port}/observer`

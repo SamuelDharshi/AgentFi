@@ -9,7 +9,8 @@
     "start": "node dist/server.js",
     "orchestrate:headless": "tsx src/orchestration/headlessLoop.ts",
     "test:e2e-live": "jest --config jest.e2e.config.cjs --runInBand",
-    "test:e2e-live:verbose": "jest --config jest.e2e.config.cjs --runInBand --verbose"
+    "test:e2e-live:verbose": "jest --config jest.e2e.config.cjs --runInBand --verbose",
+    "test:live:all": "powershell -ExecutionPolicy Bypass -File ../scripts/run-live-e2e.ps1"
   },
   "keywords": [],
   "author": "",

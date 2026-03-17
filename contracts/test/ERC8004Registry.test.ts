@@ -15,8 +15,7 @@ describe("ERC8004Registry", () => {
     [deployer, marketAgent, user, stranger, atomicSwap] =
       await ethers.getSigners();
 
-    const Factory = await ethers.getContractFactory("ERC8004Registry");
-    registry = (await Factory.deploy()) as ERC8004Registry;
+    registry = await ethers.deployContract("ERC8004Registry");
     await registry.waitForDeployment();
   });
 
