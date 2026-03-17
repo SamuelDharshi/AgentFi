@@ -338,6 +338,16 @@ app.get("/trade/offer", (req, res) => {
   });
 });
 
+app.get("/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: Date.now(),
+    uptime: process.uptime(),
+    hedera: isHederaConfigured() ? "connected" : "disconnected",
+    hcsTopic: topicId || "uninitialized",
+  });
+});
+
 app.get("/agent-status", (_req, res) => {
   const status: AgentStatus = {
     userAgentOnline: true,
