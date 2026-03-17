@@ -17,16 +17,14 @@ export interface TradeMessage {
 }
 
 export interface ChatResponse {
-  message: string;
-  analysis: {
-    slippagePct: number;
-    riskScore: number;
-    recommendedPrice: number;
-    strategy: "OTC" | "DEX";
-    reasoning: string;
-  };
-  tradeRequest: TradePayload;
-  negotiation: TradeMessage[];
+  requestId: string;
+  analysis: string;
+  amount: number;
+  sellToken: string;
+  buyToken: string;
+  currentPrice: number;
+  tradeRequest?: TradePayload;
+  negotiation?: TradeMessage[];
 }
 
 export interface TradeExecutionResponse {
@@ -38,8 +36,14 @@ export interface TradeExecutionResponse {
 }
 
 export interface TradeOfferResponse {
-  offer: TradePayload;
-  negotiation: TradeMessage[];
+  requestId: string;
+  offeredPrice: number;
+  usdcAmount: number;
+  hbarAmount: number;
+  spread: number;
+  expiresAt: number;
+  offer?: TradePayload;
+  negotiation?: TradeMessage[];
 }
 
 export interface AgentStatusResponse {

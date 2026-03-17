@@ -13,9 +13,9 @@ interface ChatWindowProps {
 }
 
 const EXAMPLE_PROMPTS = [
-  "Sell 1000 USDC for HBAR",
+  "Sell 100 USDC for HBAR",
   "Sell 500 HBAR for USDC",
-  "Trade 5000 USDC for HBAR",
+  "Sell 2500 USDC for HBAR",
 ];
 
 export function ChatWindow({
@@ -35,7 +35,7 @@ export function ChatWindow({
     event.preventDefault();
 
     if (!isConnected || !accountId) {
-      setError("Please connect your wallet first");
+      setError("Connect wallet to trade");
       return;
     }
 
@@ -45,26 +45,31 @@ export function ChatWindow({
     try {
       const data = await sendChat(message, accountId);
       setResponse(data);
-      onNegotiationUpdate(data.negotiation);
-      onRequestCreated(data.tradeRequest.requestId);
+      onRequestCreated(data.requestId);
       onTradeResponse?.(data);
       
       // Store in localStorage for reference
       if (typeof window !== "undefined") {
-        window.localStorage.setItem("agentfi:lastRequestId", data.tradeRequest.requestId);
+        window.localStorage.setItem("agentfi:lastRequestId", data.requestId);
         
-        // Auto-redirect to trade page if requested
-        if (autoRedirectToTrade) {
-          setTimeout(() => {
-            router.push(`/trade?requestId=${data.tradeRequest.requestId}`);
-          }, 1500);
-        }
+        // Auto-redirect to trade page
+        setTimeout(() => {
+          router.push(`/trade?requestId=${data.requestId}`);
+        }, 1500);
       }
       
       // Clear message after successful submission
       setMessage("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send message");
+      const errMsg = err instanceof Error ? err.message : "Failed to send message";
+      // Check if it's an amount-related error from backend
+      if (errMsg.includes("Please specify an amount")) {
+        setError("Please specify an amount. Example: Sell 100 USDC for HBAR");
+      } else if (errMsg.includes("Amount must be greater than 0")) {
+        setError("Amount must be greater than 0");
+      } else {
+        setError(errMsg);
+      }
     } finally {
       setLoading(false);
     }
@@ -88,7 +93,7 @@ export function ChatWindow({
           className="w-full h-32 bg-black/50 border-2 border-cyan-500/50 text-cyan-100 placeholder-cyan-600 p-3 rounded font-mono text-sm focus:border-cyan-400 focus:outline-none transition"
           value={message}
           onChange={(event) => setMessage(event.target.value)}
-          placeholder="e.g. Sell 1000 USDC for HBAR"
+          placeholder="Type your trade e.g. Sell 100 USDC for HBAR"
           disabled={!isConnected || loading}
           required
         />
@@ -125,12 +130,10 @@ export function ChatWindow({
         <div className="mt-6 pt-4 border-t border-cyan-500/30">
           <p className="text-xs text-cyan-300 font-mono mb-2">[ AGENT RESPONSE ]</p>
           <div className="text-sm text-white font-mono space-y-1">
-            <p>✅ Trade Request: {response.tradeRequest.requestId}</p>
-            <p>📊 Amount: {response.tradeRequest.amount} {response.tradeRequest.token}</p>
-            <p>💰 Price: ${response.analysis.recommendedPrice.toFixed(6)}</p>
-            {autoRedirectToTrade && (
-              <p className="text-cyan-300 mt-2">↳ Redirecting to trade page...</p>
-            )}
+            <p>✅ Trade Request: {response.requestId}</p>
+            <p>📊 Amount: {response.amount} {response.sellToken}</p>
+            <p>💰 Price: ${response.currentPrice.toFixed(6)}</p>
+            <p className="text-cyan-300 mt-2">↳ Redirecting to trade page...</p>
           </div>
         </div>
       )}

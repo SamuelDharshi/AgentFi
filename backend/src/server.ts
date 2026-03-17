@@ -207,7 +207,7 @@ app.post("/chat", async (req, res) => {
     const wallet = String(req.body.walletAddress ?? req.body.wallet ?? "").trim();
 
     if (!userText) {
-      return res.status(400).json({ error: "message is required" });
+      return res.status(400).json({ error: "Please specify an amount. Example: Sell 100 USDC for HBAR" });
     }
 
     if (!wallet) {
@@ -218,15 +218,29 @@ app.post("/chat", async (req, res) => {
     await sendTradeRequest(topicId, payload);
 
     res.json({
-      message: "Trade request created and sent to market agent",
-      analysis,
-      tradeRequest: payload,
-      negotiation: getNegotiationForRequest(payload.requestId),
+      requestId: payload.requestId,
+      analysis: analysis.reasoning,
+      amount: payload.amount,
+      sellToken: payload.token,
+      buyToken: payload.buyToken ?? "HBAR",
+      currentPrice: analysis.recommendedPrice,
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    
+    // Check if it's a missing amount error
+    if (message.includes("amount must be a positive number")) {
+      return res.status(400).json({ error: "Please specify an amount. Example: Sell 100 USDC for HBAR" });
+    }
+    
+    // Check if it's a zero/negative amount error
+    if (message.includes("amount must be a positive") || message.includes("Amount must be greater than 0")) {
+      return res.status(400).json({ error: "Amount must be greater than 0" });
+    }
+
     res.status(500).json({
       error: "Failed to process chat",
-      details: error instanceof Error ? error.message : "Unknown error",
+      details: message,
     });
   }
 });
@@ -305,10 +319,10 @@ app.post("/trade", async (req, res) => {
     offers.delete(requestId);
 
     return res.json({
-      executed: execution.executed,
-      transactionId: execution.transactionId,
-      settlement: execution.settlement,
-      negotiation: getNegotiationForRequest(requestId),
+      success: execution.executed,
+      txHash: execution.transactionId,
+      usdcSent: offer.token === "USDC" ? offer.amount : offer.amount * offer.price,
+      hbarReceived: offer.token === "USDC" ? offer.amount / offer.price : offer.amount,
     });
   } catch (error) {
     return res.status(500).json({
@@ -329,22 +343,41 @@ app.get("/trade/offer", (req, res) => {
     return res.status(404).json({ error: "Offer not found" });
   }
 
+  // Calculate spread as percentage
+  const spread = ((offer.price / offer.price) - 1) * 100; // Spread is 0.5% applied in marketAgent
+  const expiresAt = offer.timestamp + (5 * 60 * 1000); // 5 minute expiry
+
+  // Calculate USDC amount and HBAR amount
+  // If selling USDC for HBAR: usdcAmount = amount, hbarAmount = amount / price
+  // If selling HBAR for USDC: hbarAmount = amount, usdcAmount = amount * price
+  let usdcAmount = 0;
+  let hbarAmount = 0;
+  if (offer.token === "USDC" || offer.token === "0.0.8169931") {
+    usdcAmount = offer.amount;
+    hbarAmount = offer.amount / offer.price;
+  } else if (offer.token === "HBAR") {
+    hbarAmount = offer.amount;
+    usdcAmount = offer.amount * offer.price;
+  }
+
   // eslint-disable-next-line no-console
   console.log(`Frontend offer polling returned offer | requestId=${requestId}`);
 
   return res.json({
-    offer,
-    negotiation: getNegotiationForRequest(requestId),
+    requestId,
+    offeredPrice: offer.price,
+    usdcAmount,
+    hbarAmount,
+    spread: 0.5,
+    expiresAt,
   });
 });
 
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
-    timestamp: Date.now(),
-    uptime: process.uptime(),
-    hedera: isHederaConfigured() ? "connected" : "disconnected",
-    hcsTopic: topicId || "uninitialized",
+    network: (process.env.HEDERA_NETWORK ?? "testnet").toLowerCase(),
+    topic: process.env.HEDERA_TOPIC_ID || topicId || "",
   });
 });
 

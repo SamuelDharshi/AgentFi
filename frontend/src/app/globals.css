@@ -99,6 +99,23 @@ body {
   transform: scale(0.95);
 }
 
+/* Neon glow effects */
+.glow-text {
+  color: #a78bfa;
+  text-shadow: 0 0 10px rgba(167, 139, 250, 0.8), 0 0 20px rgba(167, 139, 250, 0.5);
+  font-weight: bold;
+}
+
+.neon-cyan {
+  color: #a78bfa;
+  border-color: #a78bfa;
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.5);
+}
+
+.neon-cyan:hover {
+  box-shadow: 0 0 20px rgba(167, 139, 250, 0.8), 0 0 30px rgba(167, 139, 250, 0.6);
+}
+
 .btn-outline {
   border: 1px solid #a855f7;
   color: #a855f7;

@@ -15,30 +15,30 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased">
+      <body className="antialiased pt-16">
         <WalletProvider>
-          <nav className="fixed top-0 left-0 w-full z-50 border-b border-white/5 bg-black/80 backdrop-blur-xl">
+          <nav className="fixed top-0 left-0 w-full z-50 border-b-2 border-violet-400 bg-black/95 backdrop-blur-lg shadow-lg shadow-violet-500/50">
             <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
               <a href="/" className="flex items-center gap-2 group">
-                <div className="w-8 h-8 bg-[#a855f7] flex items-center justify-center">
-                  <span className="text-black font-black text-xl">A</span>
+                <div className="w-8 h-8 bg-violet-500 flex items-center justify-center rounded border border-violet-300 shadow-lg shadow-violet-500/80">
+                  <span className="text-black font-black text-xl">🤖</span>
                 </div>
-                <span className="font-bold tracking-tighter text-xl group-hover:text-[#a855f7] transition-colors">
-                  AGENTFI <span className="text-xs font-mono opacity-50">OBSERVER</span>
+                <span className="font-bold tracking-tighter text-lg text-violet-400 group-hover:text-violet-300 transition-all glow-text">
+                  AGENTFI
                 </span>
               </a>
 
-              <div className="hidden md:flex items-center gap-1">
+              <div className="hidden md:flex items-center gap-6">
                 {[
                   { name: 'DASHBOARD', path: '/' },
                   { name: 'CHAT', path: '/chat' },
                   { name: 'TRADE', path: '/trade' },
-                  { name: 'STATUS', path: '/agent-status' },
+                  { name: 'OBSERVER', path: '/agent-status' },
                 ].map((item) => (
                   <a
                     key={item.path}
                     href={item.path}
-                    className="px-4 py-2 text-xs font-bold tracking-widest transition-all hover:text-[#a855f7] text-white/60"
+                    className="text-sm font-bold tracking-widest transition-all text-violet-300 hover:text-violet-400 hover:shadow-lg hover:shadow-violet-500/50 px-2 py-1"
                   >
                     {item.name}
                   </a>

@@ -16,25 +16,19 @@ export default function ChatPage() {
   >([]);
 
   function handleTradeResponse(data: ChatResponse) {
-    // Add user message
+    // Add system message with request ID
     setDisplayMessages((prev) => [
       ...prev,
-      { role: "system", text: `Request ID: ${data.tradeRequest.requestId}` },
+      { role: "system", text: `✅ Trade Request Created: ${data.requestId}` },
     ]);
 
     // Reset observers
     observerRef.current?.reset();
-    observerRef.current?.onChatResponse(data.tradeRequest);
-
-    // Push negotiation messages
-    if (data.negotiation.length > 0) {
-      observerRef.current?.onNegotiationMessages(data.negotiation);
-    }
   }
 
   function handleNegotiationUpdate(msgs: ChatResponse["negotiation"]) {
-    setMessages(msgs);
-    if (msgs.length > 0) {
+    if (msgs && msgs.length > 0) {
+      setMessages(msgs);
       observerRef.current?.onNegotiationMessages(msgs);
     }
   }
@@ -120,7 +114,7 @@ export default function ChatPage() {
                     ...prev,
                     {
                       role: "agent",
-                      text: `Market offer: ${data.tradeRequest.amount} ${data.tradeRequest.token} → ${data.tradeRequest.buyToken} @ ${data.analysis.recommendedPrice}`,
+                      text: `Market-ready: ${data.amount} ${data.sellToken} → ${data.buyToken} @ $${data.currentPrice.toFixed(6)}`,
                     },
                   ]);
                   handleTradeResponse(data);

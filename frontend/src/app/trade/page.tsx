@@ -65,7 +65,19 @@ export default function TradePage() {
           return;
         }
 
-        setOffer(data.offer);
+        // Map backend response to TradePayload format for display
+        const offerData: TradePayload = {
+          wallet: CONFIGURED_MARKET_AGENT,
+          token: "USDC",
+          amount: data.usdcAmount,
+          price: data.offeredPrice,
+          buyToken: "HBAR",
+          timestamp: Date.now(),
+          requestId: data.requestId,
+          notes: `Offer for ${data.usdcAmount} USDC → ${data.hbarAmount} HBAR`,
+        };
+
+        setOffer(offerData);
         const msgs = data.negotiation ?? [];
         setMessages(msgs);
         setOfferError(null);
@@ -76,8 +88,8 @@ export default function TradePage() {
         }
 
         // Collect market agent addresses from offer
-        if (data.offer?.wallet) {
-          setMarketAgents((prev) => Array.from(new Set([...prev, data.offer.wallet])));
+        if (CONFIGURED_MARKET_AGENT) {
+          setMarketAgents((prev) => Array.from(new Set([...prev, CONFIGURED_MARKET_AGENT])));
         }
       } catch (error) {
         if (!active) {
