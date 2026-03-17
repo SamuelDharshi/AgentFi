@@ -34,7 +34,8 @@ interface CoinGeckoMarketsRow {
   total_volume?: number;
 }
 
-const COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price";
+const COINGECKO_SIMPLE_PRICE_URL =
+  "https://api.coingecko.com/api/v3/simple/price";
 const COINGECKO_MARKETS_URL = "https://api.coingecko.com/api/v3/coins/markets";
 
 const defaultCoinGeckoIds: Record<string, string> = {
@@ -47,6 +48,25 @@ const defaultCoinGeckoIds: Record<string, string> = {
 
 let cachedClient: OpenAI | null = null;
 let cachedApiKey = "";
+
+/**
+ * Inspects an unknown error thrown by the OpenAI SDK and re-throws a clear
+ * user-facing message when the root cause is a 429 quota / rate-limit error.
+ */
+function rethrowIfQuotaError(error: unknown): never {
+  // The OpenAI SDK surfaces HTTP status on the error object.
+  const status =
+    (error as { status?: number })?.status ??
+    (error as { response?: { status?: number } })?.response?.status;
+
+  if (status === 429) {
+    throw new Error(
+      "OpenAI quota exceeded - please top up at platform.openai.com/billing",
+    );
+  }
+
+  throw error;
+}
 
 function getOpenAiConfig(): { client: OpenAI; model: string } {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
@@ -89,7 +109,8 @@ function resolveCoinGeckoId(token: string, role: "SELL" | "BUY"): string {
   }
 
   if (/^0\.0\.\d+$/.test(normalized) || normalized.startsWith("0x")) {
-    const envName = role === "SELL" ? "SELL_TOKEN_COINGECKO_ID" : "BUY_TOKEN_COINGECKO_ID";
+    const envName =
+      role === "SELL" ? "SELL_TOKEN_COINGECKO_ID" : "BUY_TOKEN_COINGECKO_ID";
     const configured = process.env[envName]?.trim();
     if (configured) {
       return configured;
@@ -98,11 +119,14 @@ function resolveCoinGeckoId(token: string, role: "SELL" | "BUY"): string {
   }
 
   throw new Error(
-    `No CoinGecko mapping found for token ${normalized}. Set COINGECKO_ID_${symbol}.`
+    `No CoinGecko mapping found for token ${normalized}. Set COINGECKO_ID_${symbol}.`,
   );
 }
 
-async function fetchMarketSnapshot(sellToken: string, buyToken: string): Promise<MarketSnapshot> {
+async function fetchMarketSnapshot(
+  sellToken: string,
+  buyToken: string,
+): Promise<MarketSnapshot> {
   const sellId = resolveCoinGeckoId(sellToken, "SELL");
   const buyId = resolveCoinGeckoId(buyToken, "BUY");
   const hbarId = "hedera-hashgraph";
@@ -124,14 +148,17 @@ async function fetchMarketSnapshot(sellToken: string, buyToken: string): Promise
 
   const simplePriceResponse = await fetch(
     `${COINGECKO_SIMPLE_PRICE_URL}?${simplePriceParams.toString()}`,
-    { headers }
+    { headers },
   );
   if (!simplePriceResponse.ok) {
     const body = await simplePriceResponse.text();
-    throw new Error(`CoinGecko simple price fetch failed (${simplePriceResponse.status}): ${body}`);
+    throw new Error(
+      `CoinGecko simple price fetch failed (${simplePriceResponse.status}): ${body}`,
+    );
   }
 
-  const simplePriceJson = (await simplePriceResponse.json()) as CoinGeckoSimplePriceResponse;
+  const simplePriceJson =
+    (await simplePriceResponse.json()) as CoinGeckoSimplePriceResponse;
   const sellUsd = simplePriceJson[sellId]?.usd;
   const buyUsd = simplePriceJson[buyId]?.usd;
   const hbarUsd = simplePriceJson[hbarId]?.usd;
@@ -151,12 +178,17 @@ async function fetchMarketSnapshot(sellToken: string, buyToken: string): Promise
     ids: hbarId,
   });
 
-  const marketResponse = await fetch(`${COINGECKO_MARKETS_URL}?${marketParams.toString()}`, {
-    headers,
-  });
+  const marketResponse = await fetch(
+    `${COINGECKO_MARKETS_URL}?${marketParams.toString()}`,
+    {
+      headers,
+    },
+  );
   if (!marketResponse.ok) {
     const body = await marketResponse.text();
-    throw new Error(`CoinGecko markets fetch failed (${marketResponse.status}): ${body}`);
+    throw new Error(
+      `CoinGecko markets fetch failed (${marketResponse.status}): ${body}`,
+    );
   }
 
   const marketJson = (await marketResponse.json()) as CoinGeckoMarketsRow[];
@@ -173,46 +205,61 @@ async function fetchMarketSnapshot(sellToken: string, buyToken: string): Promise
   };
 }
 
-function estimateSlippagePct(notionalUsd: number, dailyVolumeUsd: number): number {
+function estimateSlippagePct(
+  notionalUsd: number,
+  dailyVolumeUsd: number,
+): number {
   const participation = notionalUsd / Math.max(dailyVolumeUsd, 1);
   const raw = 0.05 + Math.sqrt(Math.max(participation, 0)) * 2.5;
   return roundTo(Math.max(0.05, Math.min(raw, 25)), 4);
 }
 
-function estimateLiquidityRatio(notionalUsd: number, dailyVolumeUsd: number): number {
+function estimateLiquidityRatio(
+  notionalUsd: number,
+  dailyVolumeUsd: number,
+): number {
   return roundTo((notionalUsd / Math.max(dailyVolumeUsd, 1)) * 100, 6);
 }
 
-async function parseTradeIntentWithOpenAi(input: string): Promise<ParsedTradeIntent> {
+async function parseTradeIntentWithOpenAi(
+  input: string,
+): Promise<ParsedTradeIntent> {
   const { client, model } = getOpenAiConfig();
 
-  const response = await client.responses.create({
-    model,
-    input: [
-      {
-        role: "system",
-        content:
-          "You extract OTC trade intents. Return strict JSON with side (BUY|SELL), amount (number), sellToken (symbol), buyToken (symbol), reasoning (short string). Convert shorthand quantities like 500k to 500000.",
+  const response = await client.responses
+    .create({
+      model,
+      input: [
+        {
+          role: "system",
+          content:
+            "You extract OTC trade intents from natural language. Return strict JSON: { side: 'BUY'|'SELL', amount: number, sellToken: string, buyToken: string, reasoning: string }. Rules: (1) amount must be a positive finite number — convert shorthand like 1k→1000, 2.5k→2500, 1m→1000000; (2) sellToken is the token the user gives away, buyToken is what they receive; (3) for 'Sell X A for B', sellToken=A buyToken=B; (4) for 'Buy X A with B', sellToken=B buyToken=A; (5) accept any token symbol including HBAR, USDC, USDT, BTC, ETH. Never use placeholder amounts — always extract the exact numeric value the user stated.",
+        },
+        {
+          role: "user",
+          content: input,
+        },
+      ],
+      text: {
+        format: {
+          type: "json_object",
+        },
       },
-      {
-        role: "user",
-        content: input,
-      },
-    ],
-    text: {
-      format: {
-        type: "json_object",
-      },
-    },
-  });
+    })
+    .catch(rethrowIfQuotaError);
 
   const text = response.output_text;
   const parsed = JSON.parse(text) as ParsedTradeIntent;
 
-  const side = parsed.side === "BUY" ? "BUY" : parsed.side === "SELL" ? "SELL" : null;
+  const side =
+    parsed.side === "BUY" ? "BUY" : parsed.side === "SELL" ? "SELL" : null;
   const amount = Number(parsed.amount);
-  const sellToken = String(parsed.sellToken ?? "").trim().toUpperCase();
-  const buyToken = String(parsed.buyToken ?? "").trim().toUpperCase();
+  const sellToken = String(parsed.sellToken ?? "")
+    .trim()
+    .toUpperCase();
+  const buyToken = String(parsed.buyToken ?? "")
+    .trim()
+    .toUpperCase();
   const reasoning = String(parsed.reasoning ?? "").trim();
 
   if (!side) {
@@ -240,38 +287,40 @@ async function analyzeRiskWithOpenAi(
   recommendedPrice: number,
   slippagePct: number,
   liquidityRatioPct: number,
-  snapshot: MarketSnapshot
+  snapshot: MarketSnapshot,
 ): Promise<RiskDecision> {
   const { client, model } = getOpenAiConfig();
 
-  const response = await client.responses.create({
-    model,
-    input: [
-      {
-        role: "system",
-        content:
-          "You are a live OTC risk analyst. Return strict JSON: riskScore (0..1), strategy (OTC|DEX), reasoning (<=240 chars). Prefer OTC when size vs liquidity is high.",
+  const response = await client.responses
+    .create({
+      model,
+      input: [
+        {
+          role: "system",
+          content:
+            "You are a live OTC risk analyst. Return strict JSON: riskScore (0..1), strategy (OTC|DEX), reasoning (<=240 chars). Prefer OTC when size vs liquidity is high.",
+        },
+        {
+          role: "user",
+          content:
+            `Input=${input}\n` +
+            `Intent=${intent.side} ${intent.amount} ${intent.sellToken} for ${intent.buyToken}\n` +
+            `recommendedPrice=${recommendedPrice}\n` +
+            `slippagePct=${slippagePct}\n` +
+            `liquidityRatioPct=${liquidityRatioPct}\n` +
+            `sellUsd=${snapshot.sellUsd}\n` +
+            `buyUsd=${snapshot.buyUsd}\n` +
+            `hbarUsd=${snapshot.hbarUsd}\n` +
+            `hbarDailyVolumeUsd=${snapshot.hbarDailyVolumeUsd}`,
+        },
+      ],
+      text: {
+        format: {
+          type: "json_object",
+        },
       },
-      {
-        role: "user",
-        content:
-          `Input=${input}\n` +
-          `Intent=${intent.side} ${intent.amount} ${intent.sellToken} for ${intent.buyToken}\n` +
-          `recommendedPrice=${recommendedPrice}\n` +
-          `slippagePct=${slippagePct}\n` +
-          `liquidityRatioPct=${liquidityRatioPct}\n` +
-          `sellUsd=${snapshot.sellUsd}\n` +
-          `buyUsd=${snapshot.buyUsd}\n` +
-          `hbarUsd=${snapshot.hbarUsd}\n` +
-          `hbarDailyVolumeUsd=${snapshot.hbarDailyVolumeUsd}`,
-      },
-    ],
-    text: {
-      format: {
-        type: "json_object",
-      },
-    },
-  });
+    })
+    .catch(rethrowIfQuotaError);
 
   const text = response.output_text;
   const parsed = JSON.parse(text) as RiskDecision;
@@ -292,15 +341,21 @@ async function analyzeRiskWithOpenAi(
 }
 
 async function analyzeAndParseTrade(
-  input: string
+  input: string,
 ): Promise<{ intent: ParsedTradeIntent; analysis: AgentAnalysis }> {
   const intent = await parseTradeIntentWithOpenAi(input);
   const snapshot = await fetchMarketSnapshot(intent.sellToken, intent.buyToken);
 
   const notionalUsd = intent.amount * snapshot.sellUsd;
   const recommendedPrice = roundTo(snapshot.sellUsd / snapshot.buyUsd, 8);
-  const slippagePct = estimateSlippagePct(notionalUsd, snapshot.hbarDailyVolumeUsd);
-  const liquidityRatioPct = estimateLiquidityRatio(notionalUsd, snapshot.hbarDailyVolumeUsd);
+  const slippagePct = estimateSlippagePct(
+    notionalUsd,
+    snapshot.hbarDailyVolumeUsd,
+  );
+  const liquidityRatioPct = estimateLiquidityRatio(
+    notionalUsd,
+    snapshot.hbarDailyVolumeUsd,
+  );
 
   const risk = await analyzeRiskWithOpenAi(
     input,
@@ -308,7 +363,7 @@ async function analyzeAndParseTrade(
     recommendedPrice,
     slippagePct,
     liquidityRatioPct,
-    snapshot
+    snapshot,
   );
 
   const reasoning =
@@ -341,7 +396,7 @@ export async function analyzeTrade(input: string): Promise<AgentAnalysis> {
 
 export async function buildTradeRequest(
   input: string,
-  wallet: string
+  wallet: string,
 ): Promise<{ payload: TradePayload; analysis: AgentAnalysis }> {
   const { intent, analysis } = await analyzeAndParseTrade(input);
 
