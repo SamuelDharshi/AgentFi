@@ -34,6 +34,7 @@ export default function RootLayout({
                   { name: 'CHAT', path: '/chat' },
                   { name: 'TRADE', path: '/trade' },
                   { name: 'OBSERVER', path: '/agent-status' },
+                  { name: 'BACKEND TEST', path: '/backend-test' },
                 ].map((item) => (
                   <a
                     key={item.path}
