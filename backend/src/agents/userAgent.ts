@@ -1,5 +1,4 @@
 import { randomUUID } from "crypto";
-import OpenAI from "openai";
 import { AgentAnalysis, TradePayload } from "../types/messages";
 
 interface ParsedTradeIntent {
@@ -34,9 +33,23 @@ interface CoinGeckoMarketsRow {
   total_volume?: number;
 }
 
+interface GeminiGenerateContentResponse {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        text?: string;
+      }>;
+    };
+  }>;
+  promptFeedback?: {
+    blockReason?: string;
+  };
+}
+
 const COINGECKO_SIMPLE_PRICE_URL =
   "https://api.coingecko.com/api/v3/simple/price";
 const COINGECKO_MARKETS_URL = "https://api.coingecko.com/api/v3/coins/markets";
+const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
 const defaultCoinGeckoIds: Record<string, string> = {
   HBAR: "hedera-hashgraph",
@@ -46,43 +59,105 @@ const defaultCoinGeckoIds: Record<string, string> = {
   ETH: "ethereum",
 };
 
-let cachedClient: OpenAI | null = null;
-let cachedApiKey = "";
-
-/**
- * Inspects an unknown error thrown by the OpenAI SDK and re-throws a clear
- * user-facing message when the root cause is a 429 quota / rate-limit error.
- */
-function rethrowIfQuotaError(error: unknown): never {
-  // The OpenAI SDK surfaces HTTP status on the error object.
-  const status =
-    (error as { status?: number })?.status ??
-    (error as { response?: { status?: number } })?.response?.status;
-
-  if (status === 429) {
-    throw new Error(
-      "OpenAI quota exceeded - please top up at platform.openai.com/billing",
-    );
-  }
-
-  throw error;
-}
-
-function getOpenAiConfig(): { client: OpenAI; model: string } {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+function getGeminiConfig(): { apiKey: string; model: string } {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is required for live trade analysis");
-  }
-
-  if (!cachedClient || cachedApiKey !== apiKey) {
-    cachedClient = new OpenAI({ apiKey });
-    cachedApiKey = apiKey;
+    throw new Error("GEMINI_API_KEY is required for live trade analysis");
   }
 
   return {
-    client: cachedClient,
-    model: process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
+    apiKey,
+    model: process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash",
   };
+}
+
+function stripMarkdownCodeFence(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("```")) {
+    return trimmed;
+  }
+
+  return trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+}
+
+function extractGeminiText(payload: GeminiGenerateContentResponse): string {
+  const text =
+    payload.candidates?.[0]?.content?.parts
+      ?.map((part) => part.text ?? "")
+      .join("")
+      .trim() ?? "";
+
+  if (text) {
+    return text;
+  }
+
+  const blockReason = payload.promptFeedback?.blockReason;
+  if (blockReason) {
+    throw new Error(`Gemini blocked the response: ${blockReason}`);
+  }
+
+  throw new Error("Gemini returned an empty response");
+}
+
+async function requestGeminiJson<T>(
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<T> {
+  const { apiKey, model } = getGeminiConfig();
+  const endpoint =
+    `${GEMINI_API_BASE_URL}/${encodeURIComponent(model)}:generateContent` +
+    `?key=${encodeURIComponent(apiKey)}`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: systemPrompt }],
+      },
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: userPrompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+
+  const responseText = await response.text();
+  if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error(
+        "Gemini quota exceeded - check quota/billing in Google AI Studio or GCP",
+      );
+    }
+
+    throw new Error(`Gemini request failed (${response.status}): ${responseText}`);
+  }
+
+  let payload: GeminiGenerateContentResponse;
+  try {
+    payload = JSON.parse(responseText) as GeminiGenerateContentResponse;
+  } catch {
+    throw new Error(
+      `Gemini returned a non-JSON response: ${responseText.slice(0, 240)}`,
+    );
+  }
+
+  const modelText = stripMarkdownCodeFence(extractGeminiText(payload));
+  try {
+    return JSON.parse(modelText) as T;
+  } catch {
+    throw new Error(
+      `Gemini returned invalid JSON payload: ${modelText.slice(0, 240)}`,
+    );
+  }
 }
 
 function roundTo(value: number, decimals: number): number {
@@ -221,35 +296,13 @@ function estimateLiquidityRatio(
   return roundTo((notionalUsd / Math.max(dailyVolumeUsd, 1)) * 100, 6);
 }
 
-async function parseTradeIntentWithOpenAi(
+async function parseTradeIntentWithGemini(
   input: string,
 ): Promise<ParsedTradeIntent> {
-  const { client, model } = getOpenAiConfig();
-
-  const response = await client.responses
-    .create({
-      model,
-      input: [
-        {
-          role: "system",
-          content:
-            "You extract OTC trade intents from natural language. Return strict JSON: { side: 'BUY'|'SELL', amount: number, sellToken: string, buyToken: string, reasoning: string }. Rules: (1) amount must be a positive finite number — convert shorthand like 1k→1000, 2.5k→2500, 1m→1000000; (2) sellToken is the token the user gives away, buyToken is what they receive; (3) for 'Sell X A for B', sellToken=A buyToken=B; (4) for 'Buy X A with B', sellToken=B buyToken=A; (5) accept any token symbol including HBAR, USDC, USDT, BTC, ETH. Never use placeholder amounts — always extract the exact numeric value the user stated.",
-        },
-        {
-          role: "user",
-          content: input,
-        },
-      ],
-      text: {
-        format: {
-          type: "json_object",
-        },
-      },
-    })
-    .catch(rethrowIfQuotaError);
-
-  const text = response.output_text;
-  const parsed = JSON.parse(text) as ParsedTradeIntent;
+  const parsed = await requestGeminiJson<ParsedTradeIntent>(
+    "You extract OTC trade intents from natural language. Return strict JSON: { side: 'BUY'|'SELL', amount: number, sellToken: string, buyToken: string, reasoning: string }. Rules: (1) amount must be a positive finite number - convert shorthand like 1k to 1000, 2.5k to 2500, 1m to 1000000; (2) sellToken is the token the user gives away, buyToken is what they receive; (3) for 'Sell X A for B', sellToken=A buyToken=B; (4) for 'Buy X A with B', sellToken=B buyToken=A; (5) accept any token symbol including HBAR, USDC, USDT, BTC, ETH. Never use placeholder amounts - always extract the exact numeric value the user stated.",
+    input,
+  );
 
   const side =
     parsed.side === "BUY" ? "BUY" : parsed.side === "SELL" ? "SELL" : null;
@@ -263,13 +316,13 @@ async function parseTradeIntentWithOpenAi(
   const reasoning = String(parsed.reasoning ?? "").trim();
 
   if (!side) {
-    throw new Error("OpenAI parse failed: side must be BUY or SELL");
+    throw new Error("Gemini parse failed: side must be BUY or SELL");
   }
   if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error("OpenAI parse failed: amount must be a positive number");
+    throw new Error("Gemini parse failed: amount must be a positive number");
   }
   if (!sellToken || !buyToken) {
-    throw new Error("OpenAI parse failed: sellToken and buyToken are required");
+    throw new Error("Gemini parse failed: sellToken and buyToken are required");
   }
 
   return {
@@ -281,7 +334,7 @@ async function parseTradeIntentWithOpenAi(
   };
 }
 
-async function analyzeRiskWithOpenAi(
+async function analyzeRiskWithGemini(
   input: string,
   intent: ParsedTradeIntent,
   recommendedPrice: number,
@@ -289,48 +342,26 @@ async function analyzeRiskWithOpenAi(
   liquidityRatioPct: number,
   snapshot: MarketSnapshot,
 ): Promise<RiskDecision> {
-  const { client, model } = getOpenAiConfig();
+  const parsed = await requestGeminiJson<RiskDecision>(
+    "You are a live OTC risk analyst. Return strict JSON: { riskScore: number, strategy: 'OTC'|'DEX', reasoning: string }. Keep riskScore in [0,1], reasoning <= 240 chars, and prefer OTC when size vs liquidity is high.",
+    `Input=${input}\n` +
+      `Intent=${intent.side} ${intent.amount} ${intent.sellToken} for ${intent.buyToken}\n` +
+      `recommendedPrice=${recommendedPrice}\n` +
+      `slippagePct=${slippagePct}\n` +
+      `liquidityRatioPct=${liquidityRatioPct}\n` +
+      `sellUsd=${snapshot.sellUsd}\n` +
+      `buyUsd=${snapshot.buyUsd}\n` +
+      `hbarUsd=${snapshot.hbarUsd}\n` +
+      `hbarDailyVolumeUsd=${snapshot.hbarDailyVolumeUsd}`,
+  );
 
-  const response = await client.responses
-    .create({
-      model,
-      input: [
-        {
-          role: "system",
-          content:
-            "You are a live OTC risk analyst. Return strict JSON: riskScore (0..1), strategy (OTC|DEX), reasoning (<=240 chars). Prefer OTC when size vs liquidity is high.",
-        },
-        {
-          role: "user",
-          content:
-            `Input=${input}\n` +
-            `Intent=${intent.side} ${intent.amount} ${intent.sellToken} for ${intent.buyToken}\n` +
-            `recommendedPrice=${recommendedPrice}\n` +
-            `slippagePct=${slippagePct}\n` +
-            `liquidityRatioPct=${liquidityRatioPct}\n` +
-            `sellUsd=${snapshot.sellUsd}\n` +
-            `buyUsd=${snapshot.buyUsd}\n` +
-            `hbarUsd=${snapshot.hbarUsd}\n` +
-            `hbarDailyVolumeUsd=${snapshot.hbarDailyVolumeUsd}`,
-        },
-      ],
-      text: {
-        format: {
-          type: "json_object",
-        },
-      },
-    })
-    .catch(rethrowIfQuotaError);
-
-  const text = response.output_text;
-  const parsed = JSON.parse(text) as RiskDecision;
   const riskScore = Number(parsed.riskScore);
 
   if (!Number.isFinite(riskScore) || riskScore < 0 || riskScore > 1) {
-    throw new Error("OpenAI risk analysis failed: riskScore out of range");
+    throw new Error("Gemini risk analysis failed: riskScore out of range");
   }
   if (parsed.strategy !== "OTC" && parsed.strategy !== "DEX") {
-    throw new Error("OpenAI risk analysis failed: strategy must be OTC or DEX");
+    throw new Error("Gemini risk analysis failed: strategy must be OTC or DEX");
   }
 
   return {
@@ -343,7 +374,7 @@ async function analyzeRiskWithOpenAi(
 async function analyzeAndParseTrade(
   input: string,
 ): Promise<{ intent: ParsedTradeIntent; analysis: AgentAnalysis }> {
-  const intent = await parseTradeIntentWithOpenAi(input);
+  const intent = await parseTradeIntentWithGemini(input);
   const snapshot = await fetchMarketSnapshot(intent.sellToken, intent.buyToken);
 
   const notionalUsd = intent.amount * snapshot.sellUsd;
@@ -357,7 +388,7 @@ async function analyzeAndParseTrade(
     snapshot.hbarDailyVolumeUsd,
   );
 
-  const risk = await analyzeRiskWithOpenAi(
+  const risk = await analyzeRiskWithGemini(
     input,
     intent,
     recommendedPrice,
