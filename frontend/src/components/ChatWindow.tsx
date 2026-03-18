@@ -89,12 +89,17 @@ export function ChatWindow({
       </p>
 
       <form className="mt-6 space-y-4" onSubmit={onSubmit}>
+        {!isConnected && (
+          <div className="p-3 bg-yellow-500/20 border border-yellow-500/50 rounded text-yellow-300 text-xs">
+            ⚠️ Connect your wallet to execute trades
+          </div>
+        )}
         <textarea
-          className="w-full h-32 bg-black/50 border-2 border-cyan-500/50 text-cyan-100 placeholder-cyan-600 p-3 rounded font-mono text-sm focus:border-cyan-400 focus:outline-none transition"
+          className="w-full h-32 bg-black/50 border-2 border-violet-400/50 text-violet-100 placeholder-violet-600 p-3 rounded font-mono text-sm focus:border-violet-400 focus:outline-none transition"
           value={message}
           onChange={(event) => setMessage(event.target.value)}
           placeholder="Type your trade e.g. Sell 100 USDC for HBAR"
-          disabled={!isConnected || loading}
+          disabled={loading}
           required
         />
 
@@ -118,8 +123,8 @@ export function ChatWindow({
         </div>
 
         <button
-          className="btn-cyan w-full py-3"
-          disabled={loading || !isConnected}
+          className="w-full py-3 border-2 border-violet-400 bg-black text-violet-300 font-bold tracking-[0.1em] hover:bg-violet-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={loading || message.trim() === "" || !isConnected}
           type="submit"
         >
           {loading ? "⏳ EXECUTING..." : "⚡ EXECUTE"}

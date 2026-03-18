@@ -94,8 +94,20 @@ export async function getTradeOffer(requestId: string): Promise<TradeOfferRespon
 }
 
 export async function getAgentStatus(): Promise<AgentStatusResponse> {
-  const response = await api.get<AgentStatusResponse>("/agent-status");
-  return response.data;
+  try {
+    const response = await api.get<any>("/health");
+    return {
+      userAgentOnline: response.data.status === "ok",
+      marketAgentOnline: response.data.status === "ok",
+      hederaConnected: response.data.network === "testnet",
+      topicId: response.data.topic || null,
+      lastMessageAt: response.data.lastActivity ? new Date(response.data.lastActivity).getTime() : null,
+      negotiationCount: response.data.negotiations || 0,
+    };
+  } catch (err) {
+    console.error("Failed to fetch agent status:", err);
+    throw err;
+  }
 }
 
 export async function getNegotiationLog(): Promise<TradeMessage[]> {

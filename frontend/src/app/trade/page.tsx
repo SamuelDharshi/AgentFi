@@ -18,7 +18,7 @@ const CONFIGURED_MARKET_AGENT = (
 
 export default function TradePage() {
   const { accountId, isConnected } = useWallet();
-  const [requestId, setRequestId] = useState("");
+  const [requestId, setRequestId] = useState<string | null>(null);
   const [messages, setMessages] = useState<TradeMessage[]>([]);
   const [offer, setOffer] = useState<TradePayload | null>(null);
   const [offerPolling, setOfferPolling] = useState(false);
@@ -41,11 +41,28 @@ export default function TradePage() {
       return;
     }
 
-    const fromStorage = window.localStorage.getItem("agentfi:lastRequestId")?.trim() ?? "";
+    const fromStorage = window.localStorage.getItem("agentfi:lastRequestId")?.trim();
     if (fromStorage) {
       setRequestId(fromStorage);
     }
   }, []);
+
+  if (!requestId) {
+    return (
+      <main className="mx-auto max-w-7xl px-4 py-8 md:px-8">
+        <div className="mt-12 text-center p-8 bg-violet-500/10 border-2 border-violet-500/50 rounded">
+          <p className="text-violet-300 text-xl mb-4">📡 No active trade found</p>
+          <p className="text-slate-400 text-sm mb-6">Go to chat to start a new trade request</p>
+          <a
+            href="/chat"
+            className="inline-block px-6 py-3 bg-violet-600 text-white rounded border-2 border-violet-400 hover:bg-violet-700 transition font-bold"
+          >
+            → GO TO CHAT
+          </a>
+        </div>
+      </main>
+    );
+  }
 
   useEffect(() => {
     if (!requestId) {

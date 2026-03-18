@@ -65,17 +65,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
 
     initPromiseRef.current = (async () => {
-      const projectId =
-        process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() || "";
+      try {
+        const projectId =
+          process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() || "";
 
-      if (!projectId) {
-        console.error(
-          "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is required for HashPack connection"
-        );
-        return;
-      }
+        if (!projectId) {
+          console.warn(
+            "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID not set. Get a free ID from https://cloud.walletconnect.com"
+          );
+        }
 
-      const hashconnectModule = await import("hashconnect");
+        const hashconnectModule = await import("hashconnect");
       const HashConnectClass = hashconnectModule.HashConnect;
 
       const hashconnect = new HashConnectClass(
@@ -133,10 +133,21 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       }
 
       hashConnectRef.current = hashconnect;
+      } catch (err) {
+        console.error(
+          "HashConnect initialization failed:",
+          err instanceof Error ? err.message : "Unknown error"
+        );
+      }
     })();
 
     try {
       await initPromiseRef.current;
+    } catch (err) {
+      console.error(
+        "HashConnect init failed:",
+        err instanceof Error ? err.message : "Unknown error"
+      );
     } finally {
       initPromiseRef.current = null;
     }
