@@ -45,8 +45,9 @@ export default function ChatPage() {
 
       <div className="flex h-screen flex-col">
         {/* Header */}
-        <header className="border-b border-cyan-500/20 bg-slate-950/40 backdrop-blur px-6 py-4">
-          <h1 className="font-orbitron text-2xl text-cyan-300 flex items-center gap-2">
+        <header className="border-b border-violet-500/20 bg-slate-950/40 backdrop-blur px-6 py-4">
+          <h1 className="font-orbitron text-2xl text-violet-300 flex items-center gap-2">
+            <span className="online-indicator" />
             🤖 UserAgent Terminal
           </h1>
           <p className="text-xs text-slate-400 mt-1">
@@ -59,7 +60,7 @@ export default function ChatPage() {
         {/* Main Content Grid */}
         <div className="flex-1 grid grid-cols-3 gap-4 overflow-hidden p-4">
           {/* LEFT SIDE: Chat (60%) */}
-          <div className="col-span-2 flex flex-col bg-slate-900/30 rounded-lg border border-cyan-500/20 overflow-hidden">
+          <div className="col-span-2 flex flex-col bg-slate-900/30 rounded-lg border border-violet-500/20 overflow-hidden">
             {/* Chat Messages Area */}
             <div className="flex-1 overflow-y-auto space-y-2 p-4 font-Share_Tech_Mono">
               {displayMessages.length === 0 ? (
@@ -72,7 +73,7 @@ export default function ChatPage() {
                     key={idx}
                     className={`text-sm font-mono transition-colors ${
                       msg.role === "user"
-                        ? "text-right text-cyan-300"
+                        ? "text-right text-violet-300"
                         : msg.role === "agent"
                           ? "text-left text-emerald-300"
                           : "text-center text-slate-400"
@@ -85,9 +86,7 @@ export default function ChatPage() {
                           ? "🤖 AGENT"
                           : "[ SYSTEM ]"}
                     </span>
-                    <div
-                      className={msg.role === "user" ? "text-right" : ""}
-                    >
+                    <div className={`${msg.role === "agent" ? "agent-message" : ""} ${msg.role === "user" ? "text-right" : ""}`}>
                       {msg.text}
                     </div>
                   </div>
@@ -96,7 +95,7 @@ export default function ChatPage() {
             </div>
 
             {/* Input Section */}
-            <div className="border-t border-cyan-500/20 bg-gradient-to-t from-slate-950 to-slate-900/50 p-4">
+            <div className="border-t border-violet-500/20 bg-gradient-to-t from-slate-950 to-slate-900/50 p-4">
               <ChatWindow
                 onNegotiationUpdate={handleNegotiationUpdate}
                 onRequestCreated={(id) => {
@@ -124,7 +123,7 @@ export default function ChatPage() {
           </div>
 
           {/* RIGHT SIDE: Observer (40%) */}
-          <div className="col-span-1 bg-slate-900/30 rounded-lg border border-cyan-500/20 overflow-y-auto p-4">
+          <div className="col-span-1 bg-slate-900/30 rounded-lg border border-violet-500/20 overflow-y-auto p-4">
             <div className="flex items-center gap-2 mb-4">
               <span className="text-lg">📡</span>
               <h2 className="font-orbitron text-sm font-semibold text-slate-200 uppercase tracking-widest">

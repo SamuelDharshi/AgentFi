@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TradeExecutionResponse, TradePayload, executeTrade } from "@/lib/api";
 
 interface TradePanelProps {
@@ -12,6 +12,8 @@ interface TradePanelProps {
   isWalletConnected: boolean;
   onNegotiationUpdate: (messages: TradeExecutionResponse["negotiation"]) => void;
 }
+
+const OFFER_TTL_SECONDS = 300; // 5 minutes
 
 export function TradePanel({
   requestId,
@@ -25,6 +27,33 @@ export function TradePanel({
   const [loadingAction, setLoadingAction] = useState<"accept" | "reject" | null>(null);
   const [result, setResult] = useState<TradeExecutionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState(OFFER_TTL_SECONDS);
+
+  // Countdown timer
+  useEffect(() => {
+    if (!offer) {
+      setCountdown(OFFER_TTL_SECONDS);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [offer]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   async function submit(accepted: boolean) {
     if (!requestId || !offer) {
@@ -88,7 +117,7 @@ export function TradePanel({
         ) : null}
 
         {offerPolling && !offer ? (
-          <div className="text-cyan-300 text-sm font-mono">📡 Polling HCS for offer...</div>
+          <div className="text-violet-300 text-sm font-mono">📡 Polling HCS for offer...</div>
         ) : null}
 
         {offerError && !offer ? (
@@ -96,8 +125,17 @@ export function TradePanel({
         ) : null}
 
         {offer ? (
-          <div className="card-dark bg-black/40 border-cyan-400 p-4">
-            <p className="text-cyan-300 font-mono text-xs mb-3">[ LIVE OFFER ]</p>
+          <div className="card-dark bg-black/40 border-violet-400 p-4">
+            <p className="text-violet-300 font-mono text-xs mb-3">[ LIVE OFFER ]</p>
+            
+            {/* Countdown Timer */}
+            <div className="mb-4 p-2 bg-slate-900/50 rounded border border-violet-500/20">
+              <span className="text-xs text-slate-400 uppercase tracking-wider">Offer Expires In</span>
+              <div className={`countdown-timer ${countdown < 10 ? 'urgent' : ''}`}>
+                {formatTime(countdown)}
+              </div>
+            </div>
+            
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-400">YOU SEND</span>
@@ -105,29 +143,29 @@ export function TradePanel({
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">YOU GET</span>
-                <span className="text-cyan-300 font-bold">{Math.round(offer.amount / offer.price)} {offer.buyToken ?? "HBAR"}</span>
+                <span className="text-violet-300 font-bold">{Math.round(offer.amount / offer.price)} {offer.buyToken ?? "HBAR"}</span>
               </div>
-              <div className="flex justify-between pt-2 border-t border-cyan-500/20">
+              <div className="flex justify-between pt-2 border-t border-violet-500/20">
                 <span className="text-gray-400">PRICE</span>
                 <span className="text-white font-mono">${offer.price.toFixed(6)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">SPREAD</span>
-                <span className="text-cyan-300">0.5%</span>
+                <span className="text-violet-300">0.5%</span>
               </div>
               {offer.notes && (
-                <p className="text-xs text-gray-400 pt-2 mt-2 border-t border-cyan-500/20">{offer.notes}</p>
+                <p className="text-xs text-gray-400 pt-2 mt-2 border-t border-violet-500/20">{offer.notes}</p>
               )}
             </div>
           </div>
         ) : requestId && !offerError ? (
-          <div className="text-cyan-300 text-sm font-mono">🔄 Waiting for market offer...</div>
+          <div className="text-violet-300 text-sm font-mono">🔄 Waiting for market offer...</div>
         ) : null}
 
         {canAct && (
           <div className="flex flex-wrap gap-3">
             <button
-              className="btn-cyan flex-1"
+              className="btn-cyan flex-1 accept-btn"
               type="button"
               onClick={() => {
                 void submit(true);
@@ -137,7 +175,7 @@ export function TradePanel({
               {loadingAction === "accept" ? "⏳ EXECUTING..." : "✅ ACCEPT TRADE"}
             </button>
             <button
-              className="btn-red-outline flex-1"
+              className="btn-red-outline flex-1 reject-btn"
               type="button"
               onClick={() => {
                 void submit(false);
@@ -166,7 +204,7 @@ export function TradePanel({
                 href={hashScanUrl || "#"}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-cyan-300 hover:text-cyan-200 underline"
+                className="text-violet-300 hover:text-violet-200 underline"
               >
                 {txHashShortened}
               </a>

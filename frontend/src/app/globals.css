@@ -376,3 +376,210 @@ body {
   color: #7e93b3;
   margin-bottom: 0.2rem;
 }
+
+/* ============================================
+   WALLET CONNECT BUTTON
+   ============================================ */
+
+.connect-btn {
+  padding: 8px 20px;
+  border: 1px solid #a855f7;
+  background: transparent;
+  color: #a855f7;
+  cursor: pointer;
+  font-family: monospace;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.connect-btn:hover {
+  background: rgba(168, 85, 247, 0.15);
+  box-shadow: 0 0 15px rgba(168, 85, 247, 0.3);
+}
+
+.connect-btn.connected {
+  border-color: #00ff80;
+  color: #00ff80;
+}
+
+.connect-btn.connecting {
+  border-color: #a855f7;
+  color: #a855f7;
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* ============================================
+   GLOBAL BACKGROUND ANIMATION
+   ============================================ */
+
+@keyframes bgshift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.animated-bg {
+  background: linear-gradient(
+    135deg,
+    #050a05 0%,
+    #0a0510 25%,
+    #050a05 50%,
+    #0a0510 75%,
+    #050a05 100%
+  );
+  background-size: 400% 400%;
+  animation: bgshift 10s ease infinite;
+}
+
+/* Top violet progress line */
+.top-progress-line {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    #a855f7,
+    #a855f7,
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: progressPulse 2s ease-in-out infinite;
+  z-index: 9999;
+}
+
+@keyframes progressPulse {
+  0%, 100% {
+    background-position: 200% 0;
+    opacity: 0.5;
+  }
+  50% {
+    background-position: 0 0;
+    opacity: 1;
+  }
+}
+
+/* ============================================
+   HOMEPAGE GLOWING ORB
+   ============================================ */
+
+.glow-orb {
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(
+    circle,
+    rgba(168, 85, 247, 0.15) 0%,
+    transparent 70%
+  );
+  filter: blur(40px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Live stats styling */
+.live-stats {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+.live-stat-item {
+  padding: 8px 16px;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  background: rgba(168, 85, 247, 0.05);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: #c084fc;
+}
+
+/* ============================================
+   CHAT PAGE STYLES
+   ============================================ */
+
+.agent-message {
+  border-left: 3px solid #a855f7;
+  padding-left: 16px;
+  margin-left: 8px;
+}
+
+.online-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: #00ff80;
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+  margin-right: 8px;
+}
+
+.execute-btn {
+  transition: all 0.3s;
+}
+
+.execute-btn:hover {
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
+}
+
+/* ============================================
+   TRADE PAGE STYLES
+   ============================================ */
+
+.countdown-timer {
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #a855f7;
+  transition: color 0.3s;
+}
+
+.countdown-timer.urgent {
+  color: #ff4444;
+  animation: pulse-red 1s ease-in-out infinite;
+}
+
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.accept-btn {
+  transition: all 0.3s;
+}
+
+.accept-btn:hover {
+  box-shadow: 0 0 15px rgba(0, 255, 128, 0.4);
+}
+
+.reject-btn {
+  transition: all 0.3s;
+}
+
+.reject-btn:hover {
+  box-shadow: 0 0 15px rgba(255, 68, 68, 0.4);
+}
+
+/* ============================================
+   NAVBAR STYLES
+   ============================================ */
+
+.nav-link {
+  color: #94a3b8;
+  transition: color 0.3s;
+  text-decoration: none;
+  padding-bottom: 4px;
+}
+
+.nav-link:hover {
+  color: #a855f7;
+}
+
+.nav-link.active {
+  color: #a855f7;
+  border-bottom: 2px solid #a855f7;
+}

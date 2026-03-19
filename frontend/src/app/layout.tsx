@@ -1,5 +1,40 @@
+// Suppress WalletConnect WebSocket errors
+if (typeof window !== 'undefined') {
+  const originalError = window.onerror
+  window.onerror = (msg, src, line, col, err) => {
+    if (
+      typeof msg === 'string' && (
+        msg.includes('WebSocket') ||
+        msg.includes('walletconnect') ||
+        msg.includes('WalletConnect') ||
+        msg.includes('Unauthorized: invalid key')
+      )
+    ) {
+      console.warn('WalletConnect error suppressed:', msg)
+      return true // suppress
+    }
+    return originalError?.(msg, src, line, col, err) ?? false
+  }
+
+  const originalUnhandled = window.onunhandledrejection
+  window.onunhandledrejection = function(event) {
+    if (
+      event?.reason?.message?.includes('WebSocket') ||
+      event?.reason?.message?.includes('walletconnect') ||
+      event?.reason?.message?.includes('invalid key')
+    ) {
+      console.warn('WalletConnect rejection suppressed')
+      event.preventDefault()
+      return
+    }
+    if (originalUnhandled) {
+      return originalUnhandled.call(window, event)
+    }
+  }
+}
+
 import type { Metadata } from "next";
-import { ConnectWallet } from "@/components/ConnectWallet";
+import ConnectWallet from "@/components/ConnectWallet";
 import { WalletProvider } from "@/context/WalletContext";
 import "./globals.css";
 
@@ -15,7 +50,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased pt-16">
+      <body className="antialiased pt-16 animated-bg">
+        {/* Top violet progress line */}
+        <div className="top-progress-line" />
+        
         <WalletProvider>
           <nav className="fixed top-0 left-0 w-full z-50 border-b-2 border-violet-400 bg-black/95 backdrop-blur-lg shadow-lg shadow-violet-500/50">
             <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -34,7 +72,6 @@ export default function RootLayout({
                   { name: 'CHAT', path: '/chat' },
                   { name: 'TRADE', path: '/trade' },
                   { name: 'OBSERVER', path: '/agent-status' },
-                  { name: 'BACKEND TEST', path: '/backend-test' },
                 ].map((item) => (
                   <a
                     key={item.path}

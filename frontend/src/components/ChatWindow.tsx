@@ -13,9 +13,9 @@ interface ChatWindowProps {
 }
 
 const EXAMPLE_PROMPTS = [
-  "Sell 100 USDC for HBAR",
-  "Sell 500 HBAR for USDC",
-  "Sell 2500 USDC for HBAR",
+  "Sell 10 USDC for HBAR",
+  "Sell 25 HBAR for USDC",
+  "Sell 50 USDC for HBAR",
 ];
 
 export function ChatWindow({
@@ -82,7 +82,7 @@ export function ChatWindow({
         Submit OTC intent to your personal agent and watch market-agent negotiation in real time.
       </p>
 
-      <p className="mt-2 text-xs text-cyan-400 font-mono">
+      <p className="mt-2 text-xs text-violet-400 font-mono">
         {isConnected && accountId
           ? `Connected: ${accountId}`
           : "Please connect your wallet first"}
@@ -98,7 +98,7 @@ export function ChatWindow({
           className="w-full h-32 bg-black/50 border-2 border-violet-400/50 text-violet-100 placeholder-violet-600 p-3 rounded font-mono text-sm focus:border-violet-400 focus:outline-none transition"
           value={message}
           onChange={(event) => setMessage(event.target.value)}
-          placeholder="Type your trade e.g. Sell 100 USDC for HBAR"
+          placeholder="Type your trade e.g. Sell 10 USDC for HBAR"
           disabled={loading}
           required
         />
@@ -132,13 +132,13 @@ export function ChatWindow({
       </form>
 
       {response && (
-        <div className="mt-6 pt-4 border-t border-cyan-500/30">
-          <p className="text-xs text-cyan-300 font-mono mb-2">[ AGENT RESPONSE ]</p>
+        <div className="mt-6 pt-4 border-t border-violet-500/30">
+          <p className="text-xs text-violet-300 font-mono mb-2">[ AGENT RESPONSE ]</p>
           <div className="text-sm text-white font-mono space-y-1">
             <p>✅ Trade Request: {response.requestId}</p>
             <p>📊 Amount: {response.amount} {response.sellToken}</p>
             <p>💰 Price: ${response.currentPrice.toFixed(6)}</p>
-            <p className="text-cyan-300 mt-2">↳ Redirecting to trade page...</p>
+            <p className="text-violet-300 mt-2">↳ Redirecting to trade page...</p>
           </div>
         </div>
       )}

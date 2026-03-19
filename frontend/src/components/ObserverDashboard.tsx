@@ -214,13 +214,13 @@ export function ObserverDashboard() {
   const statusTone = useMemo(() => {
     if (wsStatus === "connected") return "text-emerald-300";
     if (wsStatus === "error") return "text-amber-300";
-    return "text-cyan-300";
+    return "text-violet-300";
   }, [wsStatus]);
 
   return (
     <main className="mx-auto max-w-325 px-4 pb-8 pt-6 md:px-8">
-      <section className="mb-6 rounded-2xl border border-cyan-400/30 bg-slate-950/70 p-6 shadow-[0_0_80px_rgba(8,145,178,0.15)] backdrop-blur">
-        <p className="font-mono text-xs uppercase tracking-[0.26em] text-cyan-300/90">
+      <section className="mb-6 rounded-2xl border border-violet-400/30 bg-slate-950/70 p-6 shadow-[0_0_80px_rgba(124,58,237,0.15)] backdrop-blur">
+        <p className="font-mono text-xs uppercase tracking-[0.26em] text-violet-300/90">
           Autonomous Society Observer Dashboard
         </p>
         <h1 className="mt-2 font-(--font-orbitron) text-3xl text-slate-100 md:text-4xl">
@@ -284,7 +284,7 @@ export function ObserverDashboard() {
                     className={[
                       "text-sm font-semibold",
                       entry.lane === "hcs"
-                        ? "text-cyan-200"
+                        ? "text-violet-200"
                         : entry.lane === "state"
                           ? "text-violet-200"
                           : "text-emerald-200",

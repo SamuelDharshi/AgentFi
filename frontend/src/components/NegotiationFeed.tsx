@@ -24,7 +24,7 @@ export function NegotiationFeed({ messages }: NegotiationFeedProps) {
               key={`${message.type}-${message.payload.timestamp}`}
               className="rounded-xl border border-slate-700 bg-slate-900/70 p-3 text-sm"
             >
-              <p className="font-semibold text-cyan-100">{labels[message.type]}</p>
+              <p className="font-semibold text-violet-100">{labels[message.type]}</p>
               <p className="text-slate-300">
                 {message.payload.amount} {message.payload.token} @ {message.payload.price}
               </p>

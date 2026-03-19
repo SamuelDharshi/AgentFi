@@ -58,7 +58,7 @@ export function AgentStatusCard() {
           <p className={getStatusColor(status.hederaConnected)}>
             {getStatusDot(status.hederaConnected)} Hedera Link: {status.hederaConnected ? "connected" : "not configured"}
           </p>
-          <p className="font-mono text-cyan-400">
+          <p className="font-mono text-violet-400">
             📍 Topic: {status.topicId ? `0.0.${status.topicId.split(".")[2]}` : "not created"}
           </p>
           <p className="text-violet-300">💬 Negotiations: {status.negotiationCount}</p>

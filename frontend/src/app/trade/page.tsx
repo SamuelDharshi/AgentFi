@@ -47,23 +47,6 @@ export default function TradePage() {
     }
   }, []);
 
-  if (!requestId) {
-    return (
-      <main className="mx-auto max-w-7xl px-4 py-8 md:px-8">
-        <div className="mt-12 text-center p-8 bg-violet-500/10 border-2 border-violet-500/50 rounded">
-          <p className="text-violet-300 text-xl mb-4">📡 No active trade found</p>
-          <p className="text-slate-400 text-sm mb-6">Go to chat to start a new trade request</p>
-          <a
-            href="/chat"
-            className="inline-block px-6 py-3 bg-violet-600 text-white rounded border-2 border-violet-400 hover:bg-violet-700 transition font-bold"
-          >
-            → GO TO CHAT
-          </a>
-        </div>
-      </main>
-    );
-  }
-
   useEffect(() => {
     if (!requestId) {
       setOffer(null);
@@ -137,6 +120,23 @@ export default function TradePage() {
     };
   }, [requestId]);
 
+  if (!requestId) {
+    return (
+      <main className="mx-auto max-w-7xl px-4 py-8 md:px-8">
+        <div className="mt-12 text-center p-8 bg-violet-500/10 border-2 border-violet-500/50 rounded">
+          <p className="text-violet-300 text-xl mb-4">📡 No active trade found</p>
+          <p className="text-slate-400 text-sm mb-6">Go to chat to start a new trade request</p>
+          <a
+            href="/chat"
+            className="inline-block px-6 py-3 bg-violet-600 text-white rounded border-2 border-violet-400 hover:bg-violet-700 transition font-bold"
+          >
+            → GO TO CHAT
+          </a>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="mx-auto max-w-325 px-4 py-8 md:px-8">
       <h1 className="font-(--font-orbitron) text-3xl text-slate-100">Execution Console</h1>
@@ -148,7 +148,7 @@ export default function TradePage() {
           Please connect your wallet to accept trades
         </p>
       ) : (
-        <p className="mt-3 text-sm text-cyan-200/90">Connected wallet: {accountId}</p>
+        <p className="mt-3 text-sm text-violet-200/90">Connected wallet: {accountId}</p>
       )}
 
       <div className="panel-card mt-5 p-4">

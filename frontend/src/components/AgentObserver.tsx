@@ -261,8 +261,8 @@ function StatusBadge({ status }: { status: StepStatus }) {
   }
   if (status === "active") {
     return (
-      <span className="relative shrink-0 rounded-full border border-cyan-400/60 bg-cyan-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-cyan-300">
-        <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400 align-middle" />
+      <span className="relative shrink-0 rounded-full border border-violet-400/60 bg-violet-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-violet-300">
+        <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400 align-middle" />
         live
       </span>
     );
@@ -286,7 +286,7 @@ function stepRowClass(status: StepStatus): string {
   const base =
     "flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 transition-colors duration-300";
   if (status === "active")
-    return `${base} border-cyan-400/40 bg-cyan-400/5 shadow-[0_0_16px_rgba(34,211,238,0.1)]`;
+    return `${base} border-violet-400/40 bg-violet-400/5 shadow-[0_0_16px_rgba(168,85,247,0.1)]`;
   if (status === "done")
     return `${base} border-emerald-400/25 bg-emerald-400/5`;
   if (status === "error")
@@ -295,7 +295,7 @@ function stepRowClass(status: StepStatus): string {
 }
 
 function stepLabelClass(status: StepStatus): string {
-  if (status === "active") return "text-sm font-semibold text-cyan-100";
+  if (status === "active") return "text-sm font-semibold text-violet-100";
   if (status === "done") return "text-sm font-medium text-emerald-100";
   if (status === "error") return "text-sm font-medium text-rose-200";
   return "text-sm text-slate-400";

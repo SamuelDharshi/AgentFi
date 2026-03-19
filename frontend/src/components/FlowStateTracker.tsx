@@ -9,9 +9,9 @@ const STATES: ObserverFlowState[] = [
 
 const STATE_COLORS = {
   Discovering: {
-    border: "border-cyan-400",
-    bg: "bg-cyan-400/10",
-    text: "text-cyan-100",
+    border: "border-violet-400",
+    bg: "bg-violet-400/10",
+    text: "text-violet-100",
     icon: "🔍",
     animated: "animate-pulse-cyan",
   },
