@@ -78,6 +78,13 @@ export async function createTopic(memo = "AgentFi OTC Topic"): Promise<string> {
 }
 
 export async function submitMessage(topicId: string, message: string): Promise<void> {
+  // In mock mode, skip submission
+  if (isMockMode()) {
+    // eslint-disable-next-line no-console
+    console.log(`[MOCK HCS] Submitting to topic ${topicId}: ${message.substring(0, 100)}...`);
+    return;
+  }
+
   const activeClient = getClient();
   await new TopicMessageSubmitTransaction()
     .setTopicId(topicId)
@@ -86,6 +93,13 @@ export async function submitMessage(topicId: string, message: string): Promise<v
 }
 
 export async function subscribeTopic(topicId: string, handler: MessageHandler): Promise<void> {
+  // In mock mode, skip subscription
+  if (isMockMode()) {
+    // eslint-disable-next-line no-console
+    console.log(`[MOCK HCS] Subscribed to topic ${topicId} (mocked)`);
+    return;
+  }
+
   const activeClient = getClient();
   new TopicMessageQuery()
     .setTopicId(topicId)
@@ -132,6 +146,11 @@ export async function waitForTopicAvailability(
     baseDelayMs?: number;
   }
 ): Promise<void> {
+  // In mock mode, skip availability check
+  if (isMockMode()) {
+    return;
+  }
+
   const activeClient = getClient();
   const maxAttempts = Math.max(1, options?.attempts ?? 6);
   let delayMs = Math.max(100, options?.baseDelayMs ?? 250);

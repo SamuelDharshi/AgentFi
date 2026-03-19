@@ -162,7 +162,7 @@ function appendNegotiationMessage(
   lastMessageAt = Date.now();
 
   const configuredMarketAgent = configuredMarketAgentAddress();
-  if (configuredMarketAgent && message.type !== "TRADE_REQUEST") {
+  if (configuredMarketAgent && message.type === "TRADE_REQUEST") {
     activeMarketAgents.add(configuredMarketAgent);
   }
 

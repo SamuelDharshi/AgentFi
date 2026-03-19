@@ -95,10 +95,22 @@ function requireEnv(name: string): string {
 }
 
 function resolveExecutionConfig() {
+  // Allow mock execution when MOCK_HEDERA=true
   if (process.env.MOCK_HEDERA === "true") {
-    throw new Error(
-      "AtomicSwap live execution requires MOCK_HEDERA=false (mock execution is disabled)"
-    );
+    return {
+      rpcUrl: process.env.HEDERA_JSON_RPC_URL ?? "https://testnet.hashio.io/api",
+      atomicSwapAddress: process.env.ATOMIC_SWAP_ADDRESS?.trim() || "0x0000000000000000000000000000000000000000",
+      userEvmKey: process.env.USER_EVM_KEY?.trim() || "0x0000000000000000000000000000000000000000000000000000000000000000",
+      marketEvmKey: process.env.MARKET_AGENT_EVM_KEY?.trim() || process.env.HEDERA_OPERATOR_EVM_KEY?.trim() || "0x0000000000000000000000000000000000000000000000000000000000000001",
+      userEvmAddress: process.env.USER_EVM_ADDRESS?.trim() || "",
+      marketEvmAddress: process.env.MARKET_AGENT_EVM_ADDRESS?.trim() || "",
+      sellTokenDecimals: parsePositiveInt(
+        process.env.TRADE_SELL_TOKEN_DECIMALS,
+        parsePositiveInt(process.env.HEADLESS_SELL_TOKEN_DECIMALS, 6)
+      ),
+      ttlSeconds: parsePositiveInt(process.env.TRADE_TTL_SECONDS, 300),
+      isMock: true as const,
+    };
   }
 
   return {
@@ -114,6 +126,7 @@ function resolveExecutionConfig() {
       parsePositiveInt(process.env.HEADLESS_SELL_TOKEN_DECIMALS, 6)
     ),
     ttlSeconds: parsePositiveInt(process.env.TRADE_TTL_SECONDS, 300),
+    isMock: false as const,
   };
 }
 
@@ -137,6 +150,16 @@ async function fetchReputationSnapshot(
 }
 
 export async function executeTrade(trade: TradePayload): Promise<ExecutionResult> {
+  // Early mock mode check - bypass all validation and return simulated success
+  if (process.env.MOCK_HEDERA === "true") {
+    const mockTxHash = `0x${Array(64).fill(0).map(() => Math.floor(Math.random() * 16).toString(16)).join('')}`;
+    return {
+      executed: true,
+      transactionId: mockTxHash,
+      settlement: `Mock AtomicSwap executed (MOCK_HEDERA=true) | tx=${mockTxHash} | amount=${trade.amount} ${trade.token} | price=${trade.price}`,
+    };
+  }
+
   if ((trade.buyToken ?? "HBAR").toUpperCase() !== "HBAR") {
     throw new Error("Only HBAR buy-side settlement is currently supported");
   }

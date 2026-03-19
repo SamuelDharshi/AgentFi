@@ -86,10 +86,18 @@ function decrypt(cipherText: string): string {
 }
 
 async function publish(topicId: string, message: TradeMessage): Promise<void> {
-  assertLiveMode();
-
   const raw = JSON.stringify(message);
   const encrypted = encrypt(raw);
+
+  // In mock mode, skip HCS publishing but dispatch local events
+  if (isMockMode()) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[MOCK HCS] Publishing ${message.type} | topic=${topicId} requestId=${message.payload.requestId}`
+    );
+    bus.dispatchEvent(new CustomEvent("trade_message", { detail: encrypted }));
+    return;
+  }
 
   // For TRADE_REQUEST, format as a UCP dev.ucp.trading.checkout envelope
   // and submit to HCS with an EIP-191 sender signature.
@@ -216,7 +224,12 @@ export function startHcsBridge(
   topicId: string,
   onObserved?: (observation: HcsBridgeObservation) => void
 ): void {
-  assertLiveMode();
+  // In mock mode, skip Hedera subscription
+  if (isMockMode()) {
+    // eslint-disable-next-line no-console
+    console.log(`[MOCK HCS] Bridge started for topic ${topicId} (mocked)`);
+    return;
+  }
 
   subscribeProposals(
     getHcsClient(),

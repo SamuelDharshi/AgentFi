@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import Groq from "groq-sdk";
 import { AgentAnalysis, TradePayload } from "../types/messages";
 
 interface ParsedTradeIntent {
@@ -33,23 +34,9 @@ interface CoinGeckoMarketsRow {
   total_volume?: number;
 }
 
-interface GeminiGenerateContentResponse {
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{
-        text?: string;
-      }>;
-    };
-  }>;
-  promptFeedback?: {
-    blockReason?: string;
-  };
-}
-
 const COINGECKO_SIMPLE_PRICE_URL =
   "https://api.coingecko.com/api/v3/simple/price";
 const COINGECKO_MARKETS_URL = "https://api.coingecko.com/api/v3/coins/markets";
-const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
 const defaultCoinGeckoIds: Record<string, string> = {
   HBAR: "hedera-hashgraph",
@@ -59,16 +46,14 @@ const defaultCoinGeckoIds: Record<string, string> = {
   ETH: "ethereum",
 };
 
-function getGeminiConfig(): { apiKey: string; model: string } {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+function getGroqClient(): Groq {
+  const apiKey = process.env.GROQ_API_KEY?.trim();
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is required for live trade analysis");
+    throw new Error(
+      "GROQ_API_KEY missing - get free key at groq.com and add to backend/.env"
+    );
   }
-
-  return {
-    apiKey,
-    model: process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash",
-  };
+  return new Groq({ apiKey });
 }
 
 function stripMarkdownCodeFence(value: string): string {
@@ -80,82 +65,43 @@ function stripMarkdownCodeFence(value: string): string {
   return trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
 }
 
-function extractGeminiText(payload: GeminiGenerateContentResponse): string {
-  const text =
-    payload.candidates?.[0]?.content?.parts
-      ?.map((part) => part.text ?? "")
-      .join("")
-      .trim() ?? "";
-
-  if (text) {
-    return text;
-  }
-
-  const blockReason = payload.promptFeedback?.blockReason;
-  if (blockReason) {
-    throw new Error(`Gemini blocked the response: ${blockReason}`);
-  }
-
-  throw new Error("Gemini returned an empty response");
-}
-
-async function requestGeminiJson<T>(
+async function requestGroqJson<T>(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<T> {
-  const { apiKey, model } = getGeminiConfig();
-  const endpoint =
-    `${GEMINI_API_BASE_URL}/${encodeURIComponent(model)}:generateContent` +
-    `?key=${encodeURIComponent(apiKey)}`;
+  const groq = getGroqClient();
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: systemPrompt }],
-      },
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: userPrompt }],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.1,
-        responseMimeType: "application/json",
-      },
-    }),
+  const response = await groq.chat.completions.create({
+    model: "llama-3.1-8b-instant",
+    messages: [
+      { role: "system", content: systemPrompt + "\n\nCRITICAL: Return ONLY the raw JSON object. No markdown code blocks, no backticks, no extra text before or after. Just the JSON." },
+      { role: "user", content: userPrompt },
+    ],
+    temperature: 0.1,
   });
 
-  const responseText = await response.text();
-  if (!response.ok) {
-    if (response.status === 429) {
-      throw new Error(
-        "Gemini quota exceeded - check quota/billing in Google AI Studio or GCP",
-      );
-    }
-
-    throw new Error(`Gemini request failed (${response.status}): ${responseText}`);
+  let modelText = response.choices?.[0]?.message?.content ?? "";
+  
+  // Aggressive cleanup: extract just the JSON object
+  modelText = modelText.trim();
+  
+  // Find the first { and last }
+  const firstBrace = modelText.indexOf('{');
+  const lastBrace = modelText.lastIndexOf('}');
+  
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    modelText = modelText.substring(firstBrace, lastBrace + 1);
+  }
+  
+  if (!modelText) {
+    throw new Error("Groq returned an empty response");
   }
 
-  let payload: GeminiGenerateContentResponse;
-  try {
-    payload = JSON.parse(responseText) as GeminiGenerateContentResponse;
-  } catch {
-    throw new Error(
-      `Gemini returned a non-JSON response: ${responseText.slice(0, 240)}`,
-    );
-  }
-
-  const modelText = stripMarkdownCodeFence(extractGeminiText(payload));
   try {
     return JSON.parse(modelText) as T;
-  } catch {
+  } catch (e) {
     throw new Error(
-      `Gemini returned invalid JSON payload: ${modelText.slice(0, 240)}`,
+      `Groq returned invalid JSON: ${modelText.slice(0, 240)}`,
     );
   }
 }
@@ -296,10 +242,10 @@ function estimateLiquidityRatio(
   return roundTo((notionalUsd / Math.max(dailyVolumeUsd, 1)) * 100, 6);
 }
 
-async function parseTradeIntentWithGemini(
+async function parseTradeIntentWithGroq(
   input: string,
 ): Promise<ParsedTradeIntent> {
-  const parsed = await requestGeminiJson<ParsedTradeIntent>(
+  const parsed = await requestGroqJson<ParsedTradeIntent>(
     "You extract OTC trade intents from natural language. Return strict JSON: { side: 'BUY'|'SELL', amount: number, sellToken: string, buyToken: string, reasoning: string }. Rules: (1) amount must be a positive finite number - convert shorthand like 1k to 1000, 2.5k to 2500, 1m to 1000000; (2) sellToken is the token the user gives away, buyToken is what they receive; (3) for 'Sell X A for B', sellToken=A buyToken=B; (4) for 'Buy X A with B', sellToken=B buyToken=A; (5) accept any token symbol including HBAR, USDC, USDT, BTC, ETH. Never use placeholder amounts - always extract the exact numeric value the user stated.",
     input,
   );
@@ -316,13 +262,13 @@ async function parseTradeIntentWithGemini(
   const reasoning = String(parsed.reasoning ?? "").trim();
 
   if (!side) {
-    throw new Error("Gemini parse failed: side must be BUY or SELL");
+    throw new Error("Groq parse failed: side must be BUY or SELL");
   }
   if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error("Gemini parse failed: amount must be a positive number");
+    throw new Error("Groq parse failed: amount must be a positive number");
   }
   if (!sellToken || !buyToken) {
-    throw new Error("Gemini parse failed: sellToken and buyToken are required");
+    throw new Error("Groq parse failed: sellToken and buyToken are required");
   }
 
   return {
@@ -334,7 +280,7 @@ async function parseTradeIntentWithGemini(
   };
 }
 
-async function analyzeRiskWithGemini(
+async function analyzeRiskWithGroq(
   input: string,
   intent: ParsedTradeIntent,
   recommendedPrice: number,
@@ -342,7 +288,7 @@ async function analyzeRiskWithGemini(
   liquidityRatioPct: number,
   snapshot: MarketSnapshot,
 ): Promise<RiskDecision> {
-  const parsed = await requestGeminiJson<RiskDecision>(
+  const parsed = await requestGroqJson<RiskDecision>(
     "You are a live OTC risk analyst. Return strict JSON: { riskScore: number, strategy: 'OTC'|'DEX', reasoning: string }. Keep riskScore in [0,1], reasoning <= 240 chars, and prefer OTC when size vs liquidity is high.",
     `Input=${input}\n` +
       `Intent=${intent.side} ${intent.amount} ${intent.sellToken} for ${intent.buyToken}\n` +
@@ -358,10 +304,10 @@ async function analyzeRiskWithGemini(
   const riskScore = Number(parsed.riskScore);
 
   if (!Number.isFinite(riskScore) || riskScore < 0 || riskScore > 1) {
-    throw new Error("Gemini risk analysis failed: riskScore out of range");
+    throw new Error("Groq risk analysis failed: riskScore out of range");
   }
   if (parsed.strategy !== "OTC" && parsed.strategy !== "DEX") {
-    throw new Error("Gemini risk analysis failed: strategy must be OTC or DEX");
+    throw new Error("Groq risk analysis failed: strategy must be OTC or DEX");
   }
 
   return {
@@ -374,7 +320,7 @@ async function analyzeRiskWithGemini(
 async function analyzeAndParseTrade(
   input: string,
 ): Promise<{ intent: ParsedTradeIntent; analysis: AgentAnalysis }> {
-  const intent = await parseTradeIntentWithGemini(input);
+  const intent = await parseTradeIntentWithGroq(input);
   const snapshot = await fetchMarketSnapshot(intent.sellToken, intent.buyToken);
 
   const notionalUsd = intent.amount * snapshot.sellUsd;
@@ -388,7 +334,7 @@ async function analyzeAndParseTrade(
     snapshot.hbarDailyVolumeUsd,
   );
 
-  const risk = await analyzeRiskWithGemini(
+  const risk = await analyzeRiskWithGroq(
     input,
     intent,
     recommendedPrice,
