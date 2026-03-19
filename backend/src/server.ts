@@ -13,7 +13,11 @@ import {
   startHcsBridge,
 } from "./agents/communication";
 import { buildTradeRequest } from "./agents/userAgent";
-import { createTopic, isHederaConfigured } from "./hedera/client";
+import {
+  createTopic,
+  isHederaConfigured,
+  waitForTopicAvailability,
+} from "./hedera/client";
 import { startOpenClawAutonomy, stopOpenClawAutonomy } from "./openclaw";
 import { executeTrade } from "./trade/executor";
 import { AgentStatus, TradeMessage, TradePayload } from "./types/messages";
@@ -377,7 +381,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     network: (process.env.HEDERA_NETWORK ?? "testnet").toLowerCase(),
-    topic: process.env.HEDERA_TOPIC_ID || topicId || "",
+    topic: topicId || process.env.HEDERA_TOPIC_ID || "",
   });
 });
 
@@ -410,7 +414,35 @@ async function bootstrap(): Promise<void> {
     activeMarketAgents.add(configuredMarketAgent);
   }
 
-  topicId = await createTopic("AgentFi OTC Negotiation Topic");
+  const configuredTopic = (process.env.HEDERA_TOPIC_ID ?? "").trim();
+  if (configuredTopic) {
+    topicId = configuredTopic;
+    try {
+      await waitForTopicAvailability(topicId, { attempts: 5, baseDelayMs: 250 });
+      // eslint-disable-next-line no-console
+      console.log(`Using configured HCS topic ${topicId}`);
+    } catch (error) {
+      const details = error instanceof Error ? error.message : String(error);
+      // eslint-disable-next-line no-console
+      console.warn(
+        `Configured topic ${topicId} is not available (${details}). Creating a new topic.`
+      );
+      topicId = await createTopic("AgentFi OTC Negotiation Topic");
+    }
+  } else {
+    topicId = await createTopic("AgentFi OTC Negotiation Topic");
+  }
+
+  try {
+    await waitForTopicAvailability(topicId, { attempts: 6, baseDelayMs: 250 });
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    // eslint-disable-next-line no-console
+    console.warn(
+      `Topic ${topicId} may still be propagating (${details}). Continuing with bridge subscription.`
+    );
+  }
+
   setFlowState("Discovering", `topic=${topicId}`);
 
   // eslint-disable-next-line no-console
@@ -442,6 +474,52 @@ async function bootstrap(): Promise<void> {
   const port = Number(process.env.PORT || 3001);
   const httpServer = createServer(app);
   const wss = new WebSocketServer({ server: httpServer, path: "/observer" });
+
+  const handlePortInUse = async (): Promise<void> => {
+    try {
+      const response = await fetch(`http://localhost:${port}/health`);
+      if (response.ok) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `Port ${port} is already serving a backend instance. Reusing existing process.`
+        );
+        process.exit(0);
+        return;
+      }
+    } catch {
+      // No healthy backend found; fall through to hard error.
+    }
+
+    // eslint-disable-next-line no-console
+    console.error(
+      `Port ${port} is already in use. Stop the existing process or change PORT in backend/.env.`
+    );
+    process.exit(1);
+  };
+
+  httpServer.on("error", (error) => {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === "EADDRINUSE") {
+      void handlePortInUse();
+      return;
+    }
+
+    // eslint-disable-next-line no-console
+    console.error("HTTP server error:", err);
+    process.exit(1);
+  });
+
+  wss.on("error", (error) => {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === "EADDRINUSE") {
+      void handlePortInUse();
+      return;
+    }
+
+    // eslint-disable-next-line no-console
+    console.error("WebSocket server error:", err);
+    process.exit(1);
+  });
 
   wss.on("connection", (socket) => {
     wsClients.add(socket);

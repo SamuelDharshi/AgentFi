@@ -47,6 +47,10 @@ function getDappIcon(): string {
   return `${getDappUrl()}/favicon.ico`;
 }
 
+function getProjectId(): string {
+  return process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() || "";
+}
+
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [accountId, setAccountId] = useState<string | null>(null);
   const [network, setNetwork] = useState<WalletNetwork>(null);
@@ -66,75 +70,75 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
     initPromiseRef.current = (async () => {
       try {
-        const projectId =
-          process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() || "";
+        const projectId = getProjectId();
 
         if (!projectId) {
           console.warn(
             "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID not set. Get a free ID from https://cloud.walletconnect.com"
           );
-        }
-
-        const hashconnectModule = await import("hashconnect");
-      const HashConnectClass = hashconnectModule.HashConnect;
-
-      const hashconnect = new HashConnectClass(
-        "testnet" as never,
-        projectId,
-        {
-          name: "AgentFi",
-          description: "AgentFi OTC trading dashboard",
-          icons: [getDappIcon()],
-          url: getDappUrl(),
-        },
-        false
-      );
-
-      hashconnect.pairingEvent.on((session) => {
-        const pairingNetwork = parseSessionNetwork(session);
-        if (pairingNetwork !== "testnet") {
-          console.error("Only HashPack testnet sessions are supported");
-          void hashconnect.disconnect();
-          setAccountId(null);
-          setNetwork(null);
           return;
         }
 
-        const pairedAccount =
-          session.accountIds
-            .map((raw) => parseAccountId(raw))
-            .find((value): value is string => Boolean(value)) ?? null;
+        const hashconnectModule = await import("hashconnect");
+        const HashConnectClass = hashconnectModule.HashConnect;
 
-        setAccountId(pairedAccount);
-        setNetwork("testnet");
-      });
+        const hashconnect = new HashConnectClass(
+          "testnet" as never,
+          projectId,
+          {
+            name: "AgentFi",
+            description: "AgentFi OTC trading dashboard",
+            icons: [getDappIcon()],
+            url: getDappUrl(),
+          },
+          false
+        );
 
-      hashconnect.disconnectionEvent.on(() => {
-        setAccountId(null);
-        setNetwork(null);
-      });
+        hashconnect.pairingEvent.on((session) => {
+          const pairingNetwork = parseSessionNetwork(session);
+          if (pairingNetwork !== "testnet") {
+            console.warn("Only HashPack testnet sessions are supported");
+            void hashconnect.disconnect();
+            setAccountId(null);
+            setNetwork(null);
+            return;
+          }
 
-      hashconnect.connectionStatusChangeEvent.on((state) => {
-        if (String(state) === "Disconnected") {
+          const pairedAccount =
+            session.accountIds
+              .map((raw) => parseAccountId(raw))
+              .find((value): value is string => Boolean(value)) ?? null;
+
+          setAccountId(pairedAccount);
+          setNetwork("testnet");
+        });
+
+        hashconnect.disconnectionEvent.on(() => {
           setAccountId(null);
           setNetwork(null);
+        });
+
+        hashconnect.connectionStatusChangeEvent.on((state) => {
+          if (String(state) === "Disconnected") {
+            setAccountId(null);
+            setNetwork(null);
+          }
+        });
+
+        await hashconnect.init();
+
+        const connected = hashconnect.connectedAccountIds
+          .map((id) => parseAccountId(id.toString()))
+          .find((value): value is string => Boolean(value));
+
+        if (connected) {
+          setAccountId(connected);
+          setNetwork("testnet");
         }
-      });
 
-      await hashconnect.init();
-
-      const connected = hashconnect.connectedAccountIds
-        .map((id) => parseAccountId(id.toString()))
-        .find((value): value is string => Boolean(value));
-
-      if (connected) {
-        setAccountId(connected);
-        setNetwork("testnet");
-      }
-
-      hashConnectRef.current = hashconnect;
+        hashConnectRef.current = hashconnect;
       } catch (err) {
-        console.error(
+        console.warn(
           "HashConnect initialization failed:",
           err instanceof Error ? err.message : "Unknown error"
         );
@@ -144,7 +148,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     try {
       await initPromiseRef.current;
     } catch (err) {
-      console.error(
+      console.warn(
         "HashConnect init failed:",
         err instanceof Error ? err.message : "Unknown error"
       );
@@ -158,6 +162,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [initializeHashConnect]);
 
   const connect = useCallback(async () => {
+    if (!getProjectId()) {
+      throw new Error(
+        "WalletConnect project ID missing. Set NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID in frontend/.env.local"
+      );
+    }
+
     await initializeHashConnect();
 
     const hashconnect = hashConnectRef.current;

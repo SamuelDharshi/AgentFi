@@ -85,7 +85,8 @@ ehthumbs.db
 Desktop.ini
 
 # ─── Editor ───────────────────────────────────────────────────────────────────
-.vscode/
+.vscode/*
+!.vscode/mcp.json
 .idea/
 *.sublime-project
 *.sublime-workspace

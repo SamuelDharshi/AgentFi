@@ -3,6 +3,7 @@ import {
   Hbar,
   PrivateKey,
   TopicCreateTransaction,
+  TopicInfoQuery,
   TopicMessageQuery,
   TopicMessageSubmitTransaction,
   TransferTransaction,
@@ -122,5 +123,47 @@ export function isHederaConfigured(): boolean {
  */
 export function getHcsClient(): Client {
   return getClient();
+}
+
+export async function waitForTopicAvailability(
+  topicId: string,
+  options?: {
+    attempts?: number;
+    baseDelayMs?: number;
+  }
+): Promise<void> {
+  const activeClient = getClient();
+  const maxAttempts = Math.max(1, options?.attempts ?? 6);
+  let delayMs = Math.max(100, options?.baseDelayMs ?? 250);
+  let lastError = "";
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      await new TopicInfoQuery().setTopicId(topicId).execute(activeClient);
+      return;
+    } catch (error) {
+      const details = error instanceof Error ? error.message : String(error);
+      lastError = details;
+
+      const transient =
+        details.includes("NOT_FOUND") ||
+        details.includes("UNAVAILABLE") ||
+        details.includes("INVALID_TOPIC_ID") ||
+        details.includes("Connection dropped");
+
+      if (!transient || attempt >= maxAttempts - 1) {
+        break;
+      }
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, delayMs);
+      });
+      delayMs *= 2;
+    }
+  }
+
+  throw new Error(
+    `Topic ${topicId} not queryable after ${maxAttempts} attempts: ${lastError}`
+  );
 }
 
