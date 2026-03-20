@@ -1,16 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { AgentObserver, AgentObserverHandle } from "@/components/AgentObserver";
+import { useState } from "react";
 import { ChatWindow } from "@/components/ChatWindow";
 import { useWallet } from "@/context/WalletContext";
-import { ChatResponse, TradeMessage } from "@/lib/api";
+import { ChatResponse } from "@/lib/api";
 
 export default function ChatPage() {
   const { isConnected, accountId } = useWallet();
-  const [messages, setMessages] = useState<TradeMessage[]>([]);
-  const [requestId, setRequestId] = useState("");
-  const observerRef = useRef<AgentObserverHandle | null>(null);
   const [displayMessages, setDisplayMessages] = useState<
     Array<{ role: "user" | "agent" | "system"; text: string }>
   >([]);
@@ -21,16 +17,6 @@ export default function ChatPage() {
       ...prev,
       { role: "system", text: `✅ Trade Request Created: ${data.requestId}` },
     ]);
-
-    // Reset observers
-    observerRef.current?.reset();
-  }
-
-  function handleNegotiationUpdate(msgs: ChatResponse["negotiation"]) {
-    if (msgs && msgs.length > 0) {
-      setMessages(msgs);
-      observerRef.current?.onNegotiationMessages(msgs);
-    }
   }
 
   return (
@@ -57,80 +43,65 @@ export default function ChatPage() {
           </p>
         </header>
 
-        {/* Main Content Grid */}
-        <div className="flex-1 grid grid-cols-3 gap-4 overflow-hidden p-4">
-          {/* LEFT SIDE: Chat (60%) */}
-          <div className="col-span-2 flex flex-col bg-slate-900/30 rounded-lg border border-violet-500/20 overflow-hidden">
-            {/* Chat Messages Area */}
-            <div className="flex-1 overflow-y-auto space-y-2 p-4 font-Share_Tech_Mono">
-              {displayMessages.length === 0 ? (
-                <div className="text-center py-8 text-slate-400/60">
-                  <p className="text-sm">[ SYSTEM ] Chat ready. Submit your trade intent below.</p>
-                </div>
-              ) : (
-                displayMessages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`text-sm font-mono transition-colors ${
-                      msg.role === "user"
-                        ? "text-right text-violet-300"
-                        : msg.role === "agent"
-                          ? "text-left text-emerald-300"
-                          : "text-center text-slate-400"
-                    }`}
-                  >
-                    <span className="text-slate-500">
-                      {msg.role === "user"
-                        ? "> USER"
-                        : msg.role === "agent"
-                          ? "🤖 AGENT"
-                          : "[ SYSTEM ]"}
-                    </span>
-                    <div className={`${msg.role === "agent" ? "agent-message" : ""} ${msg.role === "user" ? "text-right" : ""}`}>
-                      {msg.text}
-                    </div>
+        {/* Main Content - Full Width Chat */}
+        <div className="flex-1 flex flex-col bg-slate-900/30 rounded-lg border border-violet-500/20 overflow-hidden m-4">
+          {/* Chat Messages Area */}
+          <div className="flex-1 overflow-y-auto space-y-2 p-4 font-Share_Tech_Mono">
+            {displayMessages.length === 0 ? (
+              <div className="text-center py-8 text-slate-400/60">
+                <p className="text-sm">[ SYSTEM ] Chat ready. Submit your trade intent below.</p>
+              </div>
+            ) : (
+              displayMessages.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={`text-sm font-mono transition-colors ${
+                    msg.role === "user"
+                      ? "text-right text-violet-300"
+                      : msg.role === "agent"
+                        ? "text-left text-emerald-300"
+                        : "text-center text-slate-400"
+                  }`}
+                >
+                  <span className="text-slate-500">
+                    {msg.role === "user"
+                      ? "> USER"
+                      : msg.role === "agent"
+                        ? "🤖 AGENT"
+                        : "[ SYSTEM ]"}
+                  </span>
+                  <div className={`${msg.role === "agent" ? "agent-message" : ""} ${msg.role === "user" ? "text-right" : ""}`}>
+                    {msg.text}
                   </div>
-                ))
-              )}
-            </div>
-
-            {/* Input Section */}
-            <div className="border-t border-violet-500/20 bg-gradient-to-t from-slate-950 to-slate-900/50 p-4">
-              <ChatWindow
-                onNegotiationUpdate={handleNegotiationUpdate}
-                onRequestCreated={(id) => {
-                  setRequestId(id);
-                  setDisplayMessages((prev) => [
-                    ...prev,
-                    {
-                      role: "user",
-                      text: "Trade request submitted to market agent",
-                    },
-                  ]);
-                }}
-                onTradeResponse={(data) => {
-                  setDisplayMessages((prev) => [
-                    ...prev,
-                    {
-                      role: "agent",
-                      text: `Market-ready: ${data.amount} ${data.sellToken} → ${data.buyToken} @ $${data.currentPrice.toFixed(6)}`,
-                    },
-                  ]);
-                  handleTradeResponse(data);
-                }}
-              />
-            </div>
+                </div>
+              ))
+            )}
           </div>
 
-          {/* RIGHT SIDE: Observer (40%) */}
-          <div className="col-span-1 bg-slate-900/30 rounded-lg border border-violet-500/20 overflow-y-auto p-4">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-lg">📡</span>
-              <h2 className="font-orbitron text-sm font-semibold text-slate-200 uppercase tracking-widest">
-                Agent Activity
-              </h2>
-            </div>
-            <AgentObserver controllerRef={observerRef} messages={messages} />
+          {/* Input Section */}
+          <div className="border-t border-violet-500/20 bg-gradient-to-t from-slate-950 to-slate-900/50 p-4">
+            <ChatWindow
+              onNegotiationUpdate={() => {}}
+              onRequestCreated={(id) => {
+                setDisplayMessages((prev) => [
+                  ...prev,
+                  {
+                    role: "user",
+                    text: "Trade request submitted to market agent",
+                  },
+                ]);
+              }}
+              onTradeResponse={(data) => {
+                setDisplayMessages((prev) => [
+                  ...prev,
+                  {
+                    role: "agent",
+                    text: `Market-ready: ${data.amount} ${data.sellToken} → ${data.buyToken} @ $${data.currentPrice.toFixed(6)}`,
+                  },
+                ]);
+                handleTradeResponse(data);
+              }}
+            />
           </div>
         </div>
       </div>

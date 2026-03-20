@@ -14,7 +14,7 @@ interface ChatWindowProps {
 
 const EXAMPLE_PROMPTS = [
   "Sell 10 USDC for HBAR",
-  "Sell 25 HBAR for USDC",
+  "Sell 25 USDC for HBAR",
   "Sell 50 USDC for HBAR",
 ];
 

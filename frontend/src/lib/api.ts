@@ -30,9 +30,13 @@ export interface ChatResponse {
 export interface TradeExecutionResponse {
   executed: boolean;
   transactionId?: string;
+  txHash?: string;
   settlement?: string;
   message?: string;
   negotiation?: TradeMessage[];
+  success?: boolean;
+  usdcSent?: number;
+  hbarReceived?: number;
 }
 
 export interface TradeOfferResponse {
@@ -53,6 +57,18 @@ export interface AgentStatusResponse {
   topicId: string | null;
   lastMessageAt: number | null;
   negotiationCount: number;
+}
+
+export interface BackendHealthResponse {
+  status: string;
+  network: string;
+  topic: string;
+}
+
+export interface DebugOffersResponse {
+  count: number;
+  keys: string[];
+  offers: Record<string, TradePayload>;
 }
 
 const api = axios.create({
@@ -83,7 +99,20 @@ export async function executeTrade(
     walletAddress: walletAddress ?? undefined,
     wallet: walletAddress ?? undefined,
   });
-  return response.data;
+
+  const data = response.data;
+
+  return {
+    executed: data.executed ?? data.success ?? false,
+    transactionId: data.transactionId ?? data.txHash,
+    txHash: data.txHash ?? data.transactionId,
+    settlement: data.settlement,
+    message: data.message,
+    negotiation: data.negotiation,
+    success: data.success ?? data.executed ?? false,
+    usdcSent: data.usdcSent,
+    hbarReceived: data.hbarReceived,
+  };
 }
 
 export async function getTradeOffer(requestId: string): Promise<TradeOfferResponse> {
@@ -93,8 +122,18 @@ export async function getTradeOffer(requestId: string): Promise<TradeOfferRespon
   return response.data;
 }
 
+export async function getHealth(): Promise<BackendHealthResponse> {
+  const response = await api.get<BackendHealthResponse>("/health");
+  return response.data;
+}
+
 export async function getAgentStatus(): Promise<AgentStatusResponse> {
   const response = await api.get<AgentStatusResponse>("/agent-status");
+  return response.data;
+}
+
+export async function getDebugOffers(): Promise<DebugOffersResponse> {
+  const response = await api.get<DebugOffersResponse>("/debug/offers");
   return response.data;
 }
 

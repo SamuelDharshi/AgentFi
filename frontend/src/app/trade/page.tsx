@@ -1,8 +1,7 @@
 "use client";
 
 import { isAxiosError } from "axios";
-import { useEffect, useRef, useState } from "react";
-import { AgentObserver, AgentObserverHandle } from "@/components/AgentObserver";
+import { useEffect, useState } from "react";
 import { NegotiationFeed } from "@/components/NegotiationFeed";
 import { ReputationBoard } from "@/components/ReputationBoard";
 import { TradePanel } from "@/components/TradePanel";
@@ -26,7 +25,6 @@ export default function TradePage() {
   const [marketAgents, setMarketAgents] = useState<string[]>(
     CONFIGURED_MARKET_AGENT ? [CONFIGURED_MARKET_AGENT] : []
   );
-  const observerRef = useRef<AgentObserverHandle | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -51,12 +49,24 @@ export default function TradePage() {
     if (!requestId) {
       setOffer(null);
       setOfferError(null);
+      setOfferPolling(false);
+      return;
+    }
+
+    // Don't poll if we already have an offer
+    if (offer) {
+      setOfferPolling(false);
       return;
     }
 
     let active = true;
+    let retryTimer: number | null = null;
 
     const poll = async () => {
+      if (!active) {
+        return;
+      }
+
       setOfferPolling(true);
 
       try {
@@ -77,20 +87,14 @@ export default function TradePage() {
           notes: `Offer for ${data.usdcAmount} USDC → ${data.hbarAmount} HBAR`,
         };
 
-        setOffer(offerData);
         const msgs = data.negotiation ?? [];
         setMessages(msgs);
         setOfferError(null);
 
-        // Drive observer from negotiation messages
-        if (msgs.length > 0) {
-          observerRef.current?.onNegotiationMessages(msgs);
-        }
-
-        // Collect market agent addresses from offer
-        if (CONFIGURED_MARKET_AGENT) {
-          setMarketAgents((prev) => Array.from(new Set([...prev, CONFIGURED_MARKET_AGENT])));
-        }
+        // Stop polling as soon as the offer is available.
+        setOffer(offerData);
+        setMarketAgents((prev) => Array.from(new Set([...prev, CONFIGURED_MARKET_AGENT])));
+        return;
       } catch (error) {
         if (!active) {
           return;
@@ -107,18 +111,24 @@ export default function TradePage() {
           setOfferPolling(false);
         }
       }
+
+      if (active) {
+        retryTimer = window.setTimeout(() => {
+          void poll();
+        }, OFFER_POLL_MS);
+      }
     };
 
+    // Initial poll
     void poll();
-    const interval = setInterval(() => {
-      void poll();
-    }, OFFER_POLL_MS);
 
     return () => {
       active = false;
-      clearInterval(interval);
+      if (retryTimer) {
+        window.clearTimeout(retryTimer);
+      }
     };
-  }, [requestId]);
+  }, [requestId, offer]);
 
   if (!requestId) {
     return (
@@ -169,29 +179,18 @@ export default function TradePage() {
         </p>
       </div>
 
-      {/* Main grid: trade + observer */}
-      <div className="mt-6 grid gap-5 lg:grid-cols-2">
-        <div className="space-y-5">
-          <TradePanel
-            requestId={requestId}
-            offer={offer}
-            offerPolling={offerPolling}
-            offerError={offerError}
-            walletAccountId={accountId}
-            isWalletConnected={isConnected}
-            onNegotiationUpdate={(items) => setMessages(items || [])}
-          />
-          <NegotiationFeed messages={messages} />
-        </div>
-
-        <div className="space-y-5">
-          <AgentObserver
-            controllerRef={observerRef}
-            messages={messages}
-            topicId={null}
-          />
-          <ReputationBoard marketAgents={marketAgents} />
-        </div>
+      <div className="mt-6 space-y-5 max-w-4xl mx-auto">
+        <TradePanel
+          requestId={requestId}
+          offer={offer}
+          offerPolling={offerPolling}
+          offerError={offerError}
+          walletAccountId={accountId}
+          isWalletConnected={isConnected}
+          onNegotiationUpdate={(items) => setMessages(items || [])}
+        />
+        <NegotiationFeed messages={messages} />
+        <ReputationBoard marketAgents={marketAgents} />
       </div>
     </main>
   );
