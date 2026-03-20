@@ -7,6 +7,7 @@ import {
 } from "@hashgraph/sdk";
 import { ethers } from "ethers";
 import { TradePayload } from "../types/messages";
+import { transferHBAR } from "../hedera/client";
 
 interface ExecutionResult {
   executed: boolean;
@@ -22,12 +23,16 @@ const ATOMIC_SWAP_ABI = [
   "function initiateTrade(bytes32 tradeId,address user,address htsToken,int64 tokenAmount,uint256 hbarAmountTinybars,uint256 ttlSeconds) payable",
   "function executeTrade(bytes32 tradeId)",
   "function cancelTrade(bytes32 tradeId)",
-  "function reputationRegistry() view returns (address)",
 ];
 
 const ERC20_ABI = ["function approve(address spender,uint256 amount) returns (bool)"];
 const ERC8004_REGISTRY_ABI = [
   "function getReputation(address agent) view returns (tuple(uint256 score,uint256 tradeCount,uint256 lastUpdatedAt))",
+];
+
+const ERC8004_REGISTRY_ADMIN_ABI = [
+  "function getIdentity(address agent) view returns (tuple(bool active,string agentType,string metadataURI,address owner,uint256 registeredAt))",
+  "function registerAgent(address agent,string agentType,string metadataURI)",
 ];
 
 interface ReputationRecord {
@@ -55,7 +60,7 @@ const associateTokenIfNeeded = async (
       .setAccountId(AccountId.fromString(accountId))
       .setTokenIds([TokenId.fromString(tokenId)])
       .freezeWith(client)
-      .sign(PrivateKey.fromStringDer(privateKey));
+      .sign(PrivateKey.fromStringECDSA(normaliseHexKey(privateKey)));
 
     const result = await tx.execute(client);
     const receipt = await result.getReceipt(client);
@@ -112,6 +117,10 @@ function walletToEvmAddress(wallet: string): string {
   throw new Error(`Unsupported wallet format: ${wallet}`);
 }
 
+function isPlaceholderAddress(value: string): boolean {
+  return /^0x0{40}$/i.test(value.trim());
+}
+
 function resolveSellTokenId(payloadToken: string): string {
   if (payloadToken.startsWith("0x") || /^0\.0\.\d+$/.test(payloadToken)) {
     return payloadToken;
@@ -157,14 +166,15 @@ function resolveExecutionConfig() {
 }
 
 async function fetchReputationSnapshot(
-  atomicSwapContract: ethers.Contract,
+  registryAddress: string,
   provider: ethers.JsonRpcProvider,
   marketAddress: string
 ): Promise<ReputationSnapshot> {
-  const registryAddress = ethers.getAddress(
-    (await atomicSwapContract.reputationRegistry()) as string
+  const registry = new ethers.Contract(
+    ethers.getAddress(registryAddress),
+    ERC8004_REGISTRY_ABI,
+    provider
   );
-  const registry = new ethers.Contract(registryAddress, ERC8004_REGISTRY_ABI, provider);
   const reputation = (await registry.getReputation(marketAddress)) as unknown as ReputationRecord;
 
   return {
@@ -180,7 +190,7 @@ export async function executeTrade(trade: TradePayload): Promise<ExecutionResult
   console.log('🔄 executeTrade() called');
   console.log('MOCK_HEDERA:', process.env.MOCK_HEDERA);
   console.log('ATOMIC_SWAP:', process.env.ATOMIC_SWAP_ADDRESS);
-  const registryAddress = process.env.ERC8004_REGISTRY_ADDRESS || '0x00000000000000000000000000000000007d9862';
+  const registryAddress = requireEnv("ERC8004_REGISTRY_ADDRESS");
   console.log('ERC8004:', registryAddress);
   console.log('USER_EVM_KEY exists:', !!process.env.USER_EVM_KEY);
   console.log('MARKET_EVM_KEY exists:', !!process.env.MARKET_AGENT_EVM_KEY);
@@ -230,6 +240,7 @@ export async function executeTrade(trade: TradePayload): Promise<ExecutionResult
 
   if (
     config.userEvmAddress &&
+    !isPlaceholderAddress(config.userEvmAddress) &&
     ethers.getAddress(config.userEvmAddress).toLowerCase() !== userSigner.address.toLowerCase()
   ) {
     throw new Error("USER_EVM_ADDRESS does not match USER_EVM_KEY");
@@ -237,6 +248,7 @@ export async function executeTrade(trade: TradePayload): Promise<ExecutionResult
 
   if (
     config.marketEvmAddress &&
+    !isPlaceholderAddress(config.marketEvmAddress) &&
     ethers.getAddress(config.marketEvmAddress).toLowerCase() !==
       marketSigner.address.toLowerCase()
   ) {
@@ -276,27 +288,57 @@ export async function executeTrade(trade: TradePayload): Promise<ExecutionResult
     userSigner
   );
 
-  console.log("⏳ Step 3b: Associating HTS token...");
-  
-  // Associate token for user
-  if (process.env.USER_ACCOUNT_ID && process.env.HTS_TOKEN_ID) {
-    await associateTokenIfNeeded(
-      process.env.USER_ACCOUNT_ID,
-      process.env.HEDERA_OPERATOR_KEY || "",
-      process.env.HTS_TOKEN_ID
+  console.log("⏳ Step 3a: Funding signer accounts...");
+  await transferHBAR(requireEnv("HEDERA_OPERATOR_ID"), requireEnv("USER_ACCOUNT_ID"), 5);
+  await transferHBAR(
+    requireEnv("HEDERA_OPERATOR_ID"),
+    requireEnv("MARKET_AGENT_ACCOUNT_ID"),
+    Math.max(20, Math.ceil(Number(hbarAmountTinybars) / Number(ONE_HBAR_TINYBAR)) + 5)
+  );
+  console.log("✅ Step 3a: Signer accounts funded");
+
+  const registryAdmin = new ethers.Contract(
+    registryAddress,
+    ERC8004_REGISTRY_ADMIN_ABI,
+    userSigner
+  );
+
+  try {
+    console.log("⏳ Registering market agent in ERC8004...");
+    const registerTx = await registryAdmin.registerAgent(
+      marketSigner.address,
+      "MARKET_AGENT",
+      "agentfi://market-agent"
     );
+    await registerTx.wait();
+    console.log("✅ Market agent registered in ERC8004");
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    if (details.toLowerCase().includes("already registered")) {
+      console.log("ℹ️ Market agent already registered");
+    } else {
+      console.warn(`⚠️ ERC8004 registration skipped: ${details}`);
+    }
   }
-  
-  // Associate token for market agent
-  if (process.env.MARKET_AGENT_ACCOUNT_ID && process.env.HTS_TOKEN_ID) {
-    await associateTokenIfNeeded(
-      process.env.MARKET_AGENT_ACCOUNT_ID,
-      process.env.HEDERA_OPERATOR_KEY || "",
-      process.env.HTS_TOKEN_ID
-    );
-  }
-  
-  console.log("✅ Step 3b: Token association done");
+
+  console.log("⏳ Waiting for signer accounts to propagate...");
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 5000);
+  });
+  console.log("✅ Signer accounts ready");
+
+  console.log("⏳ Step 3b: Associating HTS tokens...");
+  await associateTokenIfNeeded(
+    requireEnv("USER_ACCOUNT_ID"),
+    requireEnv("USER_EVM_KEY"),
+    requireEnv("HTS_TOKEN_ID")
+  );
+  await associateTokenIfNeeded(
+    requireEnv("MARKET_AGENT_ACCOUNT_ID"),
+    requireEnv("MARKET_AGENT_EVM_KEY"),
+    requireEnv("HTS_TOKEN_ID")
+  );
+  console.log("✅ Step 3b: Token association complete");
 
   console.log("⏳ Step 3: Calling initiateTrade()...");
   console.log(`   Trade ID: ${tradeId}`);
@@ -345,7 +387,7 @@ export async function executeTrade(trade: TradePayload): Promise<ExecutionResult
 
     console.log('⏳ Step 5: Fetching reputation snapshot...');
     reputationBefore = await fetchReputationSnapshot(
-      atomicSwapAsMarket,
+      registryAddress,
       provider,
       marketSigner.address
     );
@@ -392,7 +434,7 @@ export async function executeTrade(trade: TradePayload): Promise<ExecutionResult
   }
 
   const reputationAfter = await fetchReputationSnapshot(
-    atomicSwapAsMarket,
+    registryAddress,
     provider,
     marketSigner.address
   );
