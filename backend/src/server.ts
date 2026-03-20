@@ -185,11 +185,25 @@ function getNegotiationForRequest(requestId: string): TradeMessage[] {
 
 receiveTradeRequest(async (message) => {
   try {
+    // DEBUG: Log that message was received
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] receiveTradeRequest callback fired | type=${message.type} requestId=${message.payload.requestId}`);
+    
     appendNegotiationMessage(message, "bridge");
 
     const offer = await onTradeRequest(topicId, message);
+    
+    // DEBUG: Log offer result
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] onTradeRequest returned offer | hasOffer=${!!offer} requestId=${message.payload.requestId}`);
+    
     if (offer) {
       offers.set(offer.requestId, offer);
+      
+      // DEBUG: Log that offer was stored
+      // eslint-disable-next-line no-console
+      console.log(`[DEBUG] Offer stored in map | requestId=${offer.requestId} | offers.size=${offers.size}`);
+      
       appendNegotiationMessage(
         {
           type: "TRADE_OFFER",
@@ -200,12 +214,19 @@ receiveTradeRequest(async (message) => {
     }
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
+    // DEBUG: Log full error
     // eslint-disable-next-line no-console
-    console.error(`Failed to process trade request message: ${details}`);
+    console.error(`[DEBUG] Failed to process trade request message: ${details}`);
+    // eslint-disable-next-line no-console
+    console.error(`[DEBUG] Error stack: ${error instanceof Error ? error.stack : 'No stack'}`);
   }
 });
 
 app.post("/chat", async (req, res) => {
+  // DEBUG: Log incoming request
+  // eslint-disable-next-line no-console
+  console.log(`[DEBUG] POST /chat | message="${req.body.message}" wallet="${req.body.walletAddress}"`);
+  
   try {
     const userText = String(req.body.message ?? "").trim();
     const wallet = String(req.body.walletAddress ?? req.body.wallet ?? "").trim();
@@ -218,8 +239,21 @@ app.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "wallet is required" });
     }
 
+    // DEBUG: Log before building trade request
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] Building trade request for wallet=${wallet}`);
+    
     const { payload, analysis } = await buildTradeRequest(userText, wallet);
+    
+    // DEBUG: Log after building
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] Trade request built | requestId=${payload.requestId} amount=${payload.amount}`);
+    
     await sendTradeRequest(topicId, payload);
+    
+    // DEBUG: Log after sending
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] Trade request sent to HCS | topicId=${topicId}`);
 
     res.json({
       requestId: payload.requestId,
@@ -231,6 +265,12 @@ app.post("/chat", async (req, res) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
+    
+    // DEBUG: Log full error
+    // eslint-disable-next-line no-console
+    console.error(`[DEBUG] POST /chat ERROR: ${message}`);
+    // eslint-disable-next-line no-console
+    console.error(`[DEBUG] Stack: ${error instanceof Error ? error.stack : 'No stack'}`);
     
     // Check if it's a missing amount error
     if (message.includes("amount must be a positive number")) {
@@ -250,6 +290,10 @@ app.post("/chat", async (req, res) => {
 });
 
 app.post("/trade", async (req, res) => {
+  // DEBUG: Log incoming request
+  // eslint-disable-next-line no-console
+  console.log(`[DEBUG] POST /trade | body=${JSON.stringify(req.body)}`);
+  
   try {
     const requestId = String(req.body.requestId ?? "").trim();
     const acceptedRaw = req.body.accepted;
@@ -265,8 +309,15 @@ app.post("/trade", async (req, res) => {
 
     const accepted = acceptedRaw;
 
+    // DEBUG: Log offer lookup
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] Looking up offer | requestId=${requestId} | offers.size=${offers.size}`);
+    
     const offer = offers.get(requestId);
     if (!offer) {
+      // DEBUG: Log available keys
+      // eslint-disable-next-line no-console
+      console.log(`[DEBUG] Offer not found | availableKeys=[${Array.from(offers.keys()).join(", ")}]`);
       return res.status(404).json({ error: "Offer not found" });
     }
 
@@ -303,6 +354,9 @@ app.post("/trade", async (req, res) => {
     );
 
     const execution = await executeTrade(offer);
+    // DEBUG: Log execution result
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] executeTrade result | executed=${execution.executed} | tx=${execution.transactionId}`);
 
     const executedPayload: TradePayload = {
       ...offer,
@@ -329,21 +383,37 @@ app.post("/trade", async (req, res) => {
       hbarReceived: offer.token === "USDC" ? offer.amount / offer.price : offer.amount,
     });
   } catch (error) {
+    // DEBUG: Log full error details
+    const errorDetails = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : "No stack";
+    // eslint-disable-next-line no-console
+    console.error(`[DEBUG] POST /trade ERROR | ${errorDetails}`);
+    // eslint-disable-next-line no-console
+    console.error(`[DEBUG] Stack: ${errorStack}`);
+    
     return res.status(500).json({
       error: "Failed to execute trade",
-      details: error instanceof Error ? error.message : "Unknown error",
+      details: errorDetails,
     });
   }
 });
 
 app.get("/trade/offer", (req, res) => {
   const requestId = String(req.query.requestId ?? "").trim();
+  
+  // DEBUG: Log all available offers
+  // eslint-disable-next-line no-console
+  console.log(`[DEBUG] GET /trade/offer | requestId=${requestId} | offers.size=${offers.size} | keys=[${Array.from(offers.keys()).join(", ")}]`);
+  
   if (!requestId) {
     return res.status(400).json({ error: "requestId query param is required" });
   }
 
   const offer = offers.get(requestId);
   if (!offer) {
+    // DEBUG: Log that offer wasn't found
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] Offer not found for requestId=${requestId}`);
     return res.status(404).json({ error: "Offer not found" });
   }
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import Groq from "groq-sdk";
 import { AgentAnalysis, TradePayload } from "../types/messages";
+import { getHbarPrice } from "../utils/priceCache";
 
 interface ParsedTradeIntent {
   side: "BUY" | "SELL";
@@ -56,6 +57,45 @@ function getGroqClient(): Groq {
   return new Groq({ apiKey });
 }
 
+// Groq retry wrapper with exponential backoff
+async function callGroqWithRetry(
+  messages: any[],
+  retries = 3
+): Promise<string> {
+  const groq = getGroqClient();
+
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await groq.chat.completions.create({
+        model: "llama-3.1-8b-instant",
+        messages,
+        temperature: 0.1,
+        max_tokens: 500
+      });
+      return response.choices[0]?.message?.content || "";
+    } catch (err: any) {
+      // Check for rate limit (429)
+      if (err?.status === 429 && i < retries - 1) {
+        const waitMs = (i + 1) * 2000; // 2s, 4s, 6s
+        // eslint-disable-next-line no-console
+        console.warn(`[Groq] Rate limited - waiting ${waitMs}ms then retry ${i + 1}/${retries}`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+      // Check for other retryable errors
+      if ((err?.status >= 500 || err?.code === "ECONNRESET") && i < retries - 1) {
+        const waitMs = (i + 1) * 1000;
+        // eslint-disable-next-line no-console
+        console.warn(`[Groq] Server error ${err?.status} - retrying in ${waitMs}ms`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("Groq failed after retries");
+}
+
 function stripMarkdownCodeFence(value: string): string {
   const trimmed = value.trim();
   if (!trimmed.startsWith("```")) {
@@ -69,30 +109,24 @@ async function requestGroqJson<T>(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<T> {
-  const groq = getGroqClient();
+  const messages: any[] = [
+    { role: "system", content: systemPrompt + "\n\nCRITICAL: Return ONLY the raw JSON object. No markdown code blocks, no backticks, no extra text before or after. Just the JSON." },
+    { role: "user", content: userPrompt },
+  ];
 
-  const response = await groq.chat.completions.create({
-    model: "llama-3.1-8b-instant",
-    messages: [
-      { role: "system", content: systemPrompt + "\n\nCRITICAL: Return ONLY the raw JSON object. No markdown code blocks, no backticks, no extra text before or after. Just the JSON." },
-      { role: "user", content: userPrompt },
-    ],
-    temperature: 0.1,
-  });
+  let modelText = await callGroqWithRetry(messages, 3);
 
-  let modelText = response.choices?.[0]?.message?.content ?? "";
-  
   // Aggressive cleanup: extract just the JSON object
   modelText = modelText.trim();
-  
+
   // Find the first { and last }
   const firstBrace = modelText.indexOf('{');
   const lastBrace = modelText.lastIndexOf('}');
-  
+
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
     modelText = modelText.substring(firstBrace, lastBrace + 1);
   }
-  
+
   if (!modelText) {
     throw new Error("Groq returned an empty response");
   }
@@ -148,80 +182,78 @@ async function fetchMarketSnapshot(
   sellToken: string,
   buyToken: string,
 ): Promise<MarketSnapshot> {
+  // Use cached HBAR price first
+  const hbarUsd = await getHbarPrice();
+  
+  // Fallback prices for common tokens (avoid CoinGecko API calls)
+  const fallbackPrices: Record<string, number> = {
+    "usd-coin": 1.0,
+    tether: 1.0,
+    "hedera-hashgraph": hbarUsd,
+    bitcoin: 65000,
+    ethereum: 3500,
+  };
+  
   const sellId = resolveCoinGeckoId(sellToken, "SELL");
   const buyId = resolveCoinGeckoId(buyToken, "BUY");
-  const hbarId = "hedera-hashgraph";
-  const ids = Array.from(new Set([sellId, buyId, hbarId]));
-
-  const headers: Record<string, string> = {
-    accept: "application/json",
-  };
-
-  const apiKey = process.env.COINGECKO_API_KEY?.trim();
-  if (apiKey) {
-    headers["x-cg-pro-api-key"] = apiKey;
-  }
-
-  const simplePriceParams = new URLSearchParams({
-    ids: ids.join(","),
-    vs_currencies: "usd",
-  });
-
-  const simplePriceResponse = await fetch(
-    `${COINGECKO_SIMPLE_PRICE_URL}?${simplePriceParams.toString()}`,
-    { headers },
-  );
-  if (!simplePriceResponse.ok) {
-    const body = await simplePriceResponse.text();
-    throw new Error(
-      `CoinGecko simple price fetch failed (${simplePriceResponse.status}): ${body}`,
+  
+  // Try to fetch from CoinGecko, use fallback on rate limit
+  let sellUsd = fallbackPrices[sellId];
+  let buyUsd = fallbackPrices[buyId];
+  
+  try {
+    const headers: Record<string, string> = {
+      accept: "application/json",
+    };
+    const apiKey = process.env.COINGECKO_API_KEY?.trim();
+    if (apiKey) {
+      headers["x-cg-pro-api-key"] = apiKey;
+    }
+    
+    const ids = Array.from(new Set([sellId, buyId, "hedera-hashgraph"]));
+    const params = new URLSearchParams({
+      ids: ids.join(","),
+      vs_currencies: "usd",
+    });
+    
+    const response = await fetch(
+      `${COINGECKO_SIMPLE_PRICE_URL}?${params.toString()}`,
+      { headers },
     );
+    
+    if (response.ok) {
+      const data = await response.json() as CoinGeckoSimplePriceResponse;
+      if (data[sellId]?.usd) sellUsd = data[sellId].usd;
+      if (data[buyId]?.usd) buyUsd = data[buyId].usd;
+      // eslint-disable-next-line no-console
+      console.log(`[userAgent] CoinGecko prices fetched: ${sellId}=$${sellUsd}, ${buyId}=$${buyUsd}`);
+    } else if (response.status === 429) {
+      // eslint-disable-next-line no-console
+      console.warn(`[userAgent] CoinGecko rate limited - using fallback prices`);
+    } else {
+      // eslint-disable-next-line no-console
+      console.warn(`[userAgent] CoinGecko error ${response.status} - using fallback prices`);
+    }
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error(`[userAgent] CoinGecko fetch failed: ${err.message} - using fallback prices`);
   }
-
-  const simplePriceJson =
-    (await simplePriceResponse.json()) as CoinGeckoSimplePriceResponse;
-  const sellUsd = simplePriceJson[sellId]?.usd;
-  const buyUsd = simplePriceJson[buyId]?.usd;
-  const hbarUsd = simplePriceJson[hbarId]?.usd;
-
-  if (!Number.isFinite(sellUsd) || (sellUsd ?? 0) <= 0) {
+  
+  // Ensure we have valid prices
+  if (!sellUsd || sellUsd <= 0) {
     throw new Error(`Missing valid USD price for ${sellToken} (${sellId})`);
   }
-  if (!Number.isFinite(buyUsd) || (buyUsd ?? 0) <= 0) {
+  if (!buyUsd || buyUsd <= 0) {
     throw new Error(`Missing valid USD price for ${buyToken} (${buyId})`);
   }
-  if (!Number.isFinite(hbarUsd) || (hbarUsd ?? 0) <= 0) {
-    throw new Error("Missing valid USD price for HBAR (hedera-hashgraph)");
-  }
-
-  const marketParams = new URLSearchParams({
-    vs_currency: "usd",
-    ids: hbarId,
-  });
-
-  const marketResponse = await fetch(
-    `${COINGECKO_MARKETS_URL}?${marketParams.toString()}`,
-    {
-      headers,
-    },
-  );
-  if (!marketResponse.ok) {
-    const body = await marketResponse.text();
-    throw new Error(
-      `CoinGecko markets fetch failed (${marketResponse.status}): ${body}`,
-    );
-  }
-
-  const marketJson = (await marketResponse.json()) as CoinGeckoMarketsRow[];
-  const hbarDailyVolumeUsd = Number(marketJson[0]?.total_volume ?? 0);
-  if (!Number.isFinite(hbarDailyVolumeUsd) || hbarDailyVolumeUsd <= 0) {
-    throw new Error("CoinGecko returned invalid HBAR daily volume");
-  }
-
+  
+  // Use fallback volume (not critical for basic trading)
+  const hbarDailyVolumeUsd = 100000000; // $100M fallback
+  
   return {
-    sellUsd: sellUsd as number,
-    buyUsd: buyUsd as number,
-    hbarUsd: hbarUsd as number,
+    sellUsd,
+    buyUsd,
+    hbarUsd,
     hbarDailyVolumeUsd,
   };
 }

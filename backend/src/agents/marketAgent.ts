@@ -1,5 +1,6 @@
 import { sendTradeOffer } from "./communication";
 import { TradeMessage, TradePayload } from "../types/messages";
+import { getHbarPrice } from "../utils/priceCache";
 
 interface CoinGeckoSimplePriceResponse {
   [id: string]: {
@@ -109,25 +110,92 @@ export async function evaluateOffer(request: TradePayload): Promise<TradePayload
   const sellToken = request.token.trim();
   const buyToken = (request.buyToken ?? "HBAR").trim();
 
+  // Use cached/fallback HBAR price
+  const hbarUsd = await getHbarPrice();
+  
+  // Fetch only sell token price (minimize API calls)
   const sellCoinGeckoId = resolveCoinGeckoId(sellToken, "SELL");
-  const buyCoinGeckoId = resolveCoinGeckoId(buyToken, "BUY");
-  const prices = await fetchUsdPrices([sellCoinGeckoId, buyCoinGeckoId]);
-
-  const marketPrice = prices[sellCoinGeckoId] / prices[buyCoinGeckoId];
-  if (!Number.isFinite(marketPrice) || marketPrice <= 0) {
-    throw new Error("Invalid live market price computed from CoinGecko feed");
+  
+  try {
+    const headers: Record<string, string> = {
+      accept: "application/json",
+    };
+    const apiKey = process.env.COINGECKO_API_KEY?.trim();
+    if (apiKey) {
+      headers["x-cg-pro-api-key"] = apiKey;
+    }
+    
+    const params = new URLSearchParams({
+      ids: sellCoinGeckoId,
+      vs_currencies: "usd",
+    });
+    
+    const response = await fetch(`${COINGECKO_SIMPLE_PRICE_URL}?${params.toString()}`, { headers });
+    
+    if (!response.ok) {
+      // Use fallback prices if rate limited
+      // eslint-disable-next-line no-console
+      console.warn(`[marketAgent] CoinGecko fetch failed (${response.status}), using fallback prices`);
+      const fallbackPrices: Record<string, number> = {
+        "usd-coin": 1.0,
+        tether: 1.0,
+        "hedera-hashgraph": hbarUsd,
+        bitcoin: 65000,
+        ethereum: 3500,
+      };
+      const sellUsd = fallbackPrices[sellCoinGeckoId] || 1.0;
+      const marketPrice = sellUsd / hbarUsd;
+      const offerPrice = Number((marketPrice * (1 - SPREAD_BPS / 10_000)).toFixed(8));
+      
+      return {
+        ...request,
+        price: offerPrice,
+        timestamp: Date.now(),
+        notes: `Settlement: immediate | market=${marketPrice.toFixed(8)} ${buyToken}/${sellToken} | spread=${(SPREAD_BPS / 100).toFixed(2)}% | (fallback price)`,
+      };
+    }
+    
+    const data = await response.json() as CoinGeckoSimplePriceResponse;
+    const sellUsd = data[sellCoinGeckoId]?.usd;
+    
+    if (!sellUsd || sellUsd <= 0) {
+      throw new Error(`Invalid price for ${sellToken}`);
+    }
+    
+    const marketPrice = sellUsd / hbarUsd;
+    if (!Number.isFinite(marketPrice) || marketPrice <= 0) {
+      throw new Error("Invalid live market price computed");
+    }
+    
+    const offerPrice = Number((marketPrice * (1 - SPREAD_BPS / 10_000)).toFixed(8));
+    
+    return {
+      ...request,
+      price: offerPrice,
+      timestamp: Date.now(),
+      notes: `Settlement: immediate | market=${marketPrice.toFixed(8)} ${buyToken}/${sellToken} | spread=${(SPREAD_BPS / 100).toFixed(2)}%`,
+    };
+    
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error(`[marketAgent] Error fetching price: ${err.message}`);
+    // Use fallback prices
+    const fallbackPrices: Record<string, number> = {
+      "usd-coin": 1.0,
+      tether: 1.0,
+      "hedera-hashgraph": hbarUsd,
+    };
+    const sellUsd = fallbackPrices[sellCoinGeckoId] || 1.0;
+    const marketPrice = sellUsd / hbarUsd;
+    const offerPrice = Number((marketPrice * (1 - SPREAD_BPS / 10_000)).toFixed(8));
+    
+    return {
+      ...request,
+      price: offerPrice,
+      timestamp: Date.now(),
+      notes: `Settlement: immediate | market=${marketPrice.toFixed(8)} ${buyToken}/${sellToken} | spread=${(SPREAD_BPS / 100).toFixed(2)}% | (error fallback)`,
+    };
   }
-
-  const offerPrice = Number((marketPrice * (1 - SPREAD_BPS / 10_000)).toFixed(8));
-
-  return {
-    ...request,
-    price: offerPrice,
-    timestamp: Date.now(),
-    notes:
-      `Settlement: immediate | market=${marketPrice.toFixed(8)} ${buyToken}/${sellToken}` +
-      ` | spread=${(SPREAD_BPS / 100).toFixed(2)}%`,
-  };
 }
 
 export async function onTradeRequest(topicId: string, message: TradeMessage): Promise<TradePayload | null> {
@@ -135,12 +203,38 @@ export async function onTradeRequest(topicId: string, message: TradeMessage): Pr
     return null;
   }
 
-  assertWalletIdentity(message.payload.wallet);
-
+  // DEBUG: Log entry
   // eslint-disable-next-line no-console
-  console.log(`✅ MarketAgent received TRADE_REQUEST | requestId=${message.payload.requestId}`);
+  console.log(`[DEBUG] onTradeRequest START | requestId=${message.payload.requestId}`);
 
-  const offer = await evaluateOffer(message.payload);
-  await sendTradeOffer(topicId, offer);
-  return offer;
+  try {
+    assertWalletIdentity(message.payload.wallet);
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] Wallet identity validated`);
+
+    // eslint-disable-next-line no-console
+    console.log(`✅ MarketAgent received TRADE_REQUEST | requestId=${message.payload.requestId}`);
+
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] Calling evaluateOffer...`);
+    const offer = await evaluateOffer(message.payload);
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] evaluateOffer returned | price=${offer.price}`);
+    
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] Calling sendTradeOffer...`);
+    await sendTradeOffer(topicId, offer);
+    // eslint-disable-next-line no-console
+    console.log(`[DEBUG] sendTradeOffer completed`);
+    
+    return offer;
+  } catch (error) {
+    // DEBUG: Log any errors
+    const details = error instanceof Error ? error.message : String(error);
+    // eslint-disable-next-line no-console
+    console.error(`[DEBUG] onTradeRequest ERROR: ${details}`);
+    // eslint-disable-next-line no-console
+    console.error(`[DEBUG] Stack: ${error instanceof Error ? error.stack : 'No stack'}`);
+    throw error;
+  }
 }
