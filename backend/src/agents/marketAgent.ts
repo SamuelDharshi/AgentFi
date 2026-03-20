@@ -147,6 +147,15 @@ export async function evaluateOffer(request: TradePayload): Promise<TradePayload
       const marketPrice = sellUsd / hbarUsd;
       const offerPrice = Number((marketPrice * (1 - SPREAD_BPS / 10_000)).toFixed(8));
       
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('💰 PRICE CALCULATION (FALLBACK):');
+      console.log(`   USDC amount: ${request.amount}`);
+      console.log(`   HBAR price: $${hbarUsd}`);
+      console.log(`   Raw HBAR: ${request.amount / hbarUsd}`);
+      console.log(`   After spread: ${offerPrice}`);
+      console.log(`   Expected ~${Math.floor(request.amount / hbarUsd)} HBAR`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
       return {
         ...request,
         price: offerPrice,
@@ -167,7 +176,17 @@ export async function evaluateOffer(request: TradePayload): Promise<TradePayload
       throw new Error("Invalid live market price computed");
     }
     
+    // Price calculation with spread (user gets slightly less HBAR for spread)
     const offerPrice = Number((marketPrice * (1 - SPREAD_BPS / 10_000)).toFixed(8));
+    
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('💰 PRICE CALCULATION:');
+    console.log(`   USDC amount: ${request.amount}`);
+    console.log(`   HBAR price: $${hbarUsd}`);
+    console.log(`   Raw HBAR: ${request.amount / hbarUsd}`);
+    console.log(`   After spread: ${offerPrice}`);
+    console.log(`   Expected ~${Math.floor(request.amount / hbarUsd)} HBAR`);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
     return {
       ...request,
@@ -203,38 +222,28 @@ export async function onTradeRequest(topicId: string, message: TradeMessage): Pr
     return null;
   }
 
-  // DEBUG: Log entry
-  // eslint-disable-next-line no-console
-  console.log(`[DEBUG] onTradeRequest START | requestId=${message.payload.requestId}`);
+  console.log('✅ Step 4: MarketAgent received TRADE_REQUEST');
+  console.log(`   Request ID: ${message.payload.requestId}`);
+  console.log(`   Wallet: ${message.payload.wallet}`);
 
   try {
     assertWalletIdentity(message.payload.wallet);
-    // eslint-disable-next-line no-console
-    console.log(`[DEBUG] Wallet identity validated`);
+    console.log(`   Wallet identity validated`);
 
-    // eslint-disable-next-line no-console
-    console.log(`✅ MarketAgent received TRADE_REQUEST | requestId=${message.payload.requestId}`);
-
-    // eslint-disable-next-line no-console
-    console.log(`[DEBUG] Calling evaluateOffer...`);
+    console.log('✅ Step 5: Calculating offer...');
     const offer = await evaluateOffer(message.payload);
-    // eslint-disable-next-line no-console
-    console.log(`[DEBUG] evaluateOffer returned | price=${offer.price}`);
+    console.log(`   Price: ${offer.price}`);
+    console.log(`   Amount: ${offer.amount} ${offer.token}`);
     
-    // eslint-disable-next-line no-console
-    console.log(`[DEBUG] Calling sendTradeOffer...`);
+    console.log('✅ Step 6: Sending TRADE_OFFER to HCS...');
     await sendTradeOffer(topicId, offer);
-    // eslint-disable-next-line no-console
-    console.log(`[DEBUG] sendTradeOffer completed`);
+    console.log(`   Offer published to topic ${topicId}`);
     
     return offer;
   } catch (error) {
-    // DEBUG: Log any errors
     const details = error instanceof Error ? error.message : String(error);
-    // eslint-disable-next-line no-console
-    console.error(`[DEBUG] onTradeRequest ERROR: ${details}`);
-    // eslint-disable-next-line no-console
-    console.error(`[DEBUG] Stack: ${error instanceof Error ? error.stack : 'No stack'}`);
+    console.error(`❌ MarketAgent ERROR: ${details}`);
+    console.error(`Stack: ${error instanceof Error ? error.stack : 'No stack'}`);
     throw error;
   }
 }

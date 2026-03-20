@@ -407,19 +407,31 @@ export async function buildTradeRequest(
   input: string,
   wallet: string,
 ): Promise<{ payload: TradePayload; analysis: AgentAnalysis }> {
+  console.log('✅ Step 1: UserAgent received request');
+  console.log(`   Input: ${input}`);
+  console.log(`   Wallet: ${wallet}`);
+  
+  console.log('✅ Step 2: Analyzing market...');
   const { intent, analysis } = await analyzeAndParseTrade(input);
+  console.log(`   Price: $${analysis.recommendedPrice}`);
+  console.log(`   Risk: ${analysis.riskScore}`);
+  
+  console.log('✅ Step 3: Building trade payload');
+  const payload = {
+    wallet,
+    token: intent.sellToken,
+    amount: intent.amount,
+    price: analysis.recommendedPrice,
+    buyToken: intent.buyToken,
+    timestamp: Date.now(),
+    requestId: `req-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    notes: `${intent.side} ${intent.amount} ${intent.sellToken} for ${intent.buyToken}`,
+  };
+  
+  console.log(`   Request ID: ${payload.requestId}`);
 
   return {
-    payload: {
-      wallet,
-      token: intent.sellToken,
-      amount: intent.amount,
-      price: analysis.recommendedPrice,
-      buyToken: intent.buyToken,
-      timestamp: Date.now(),
-      requestId: `req-${Date.now()}-${randomUUID().slice(0, 8)}`,
-      notes: `${intent.side} ${intent.amount} ${intent.sellToken} for ${intent.buyToken}`,
-    },
+    payload,
     analysis,
   };
 }

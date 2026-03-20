@@ -137,22 +137,26 @@ async function publish(topicId: string, message: TradeMessage): Promise<void> {
 }
 
 export async function sendTradeRequest(topicId: string, payload: TradePayload): Promise<void> {
+  console.log('✅ Step 3: TRADE_REQUEST → HCS');
+  console.log(`   Topic: ${topicId}`);
+  console.log(`   Request ID: ${payload.requestId}`);
   await publish(topicId, {
     type: "TRADE_REQUEST",
     payload,
   });
+  console.log('   Published to HCS');
 }
 
 export async function sendTradeOffer(topicId: string, payload: TradePayload): Promise<void> {
+  console.log('✅ Step 6: TRADE_OFFER → HCS');
+  console.log(`   Topic: ${topicId}`);
+  console.log(`   Request ID: ${payload.requestId}`);
+  console.log(`   Price: ${payload.price}`);
   await publish(topicId, {
     type: "TRADE_OFFER",
     payload,
   });
-
-  // eslint-disable-next-line no-console
-  console.log(
-    `✅ TRADE_OFFER published to HCS topic | topic=${topicId} requestId=${payload.requestId}`
-  );
+  console.log('   Offer published to HCS');
 }
 
 export async function sendTradeAccept(topicId: string, payload: TradePayload): Promise<void> {
@@ -163,15 +167,15 @@ export async function sendTradeAccept(topicId: string, payload: TradePayload): P
 }
 
 export async function sendTradeExecuted(topicId: string, payload: TradePayload): Promise<void> {
+  console.log('✅ Step 11: TRADE_EXECUTED → HCS');
+  console.log(`   Topic: ${topicId}`);
+  console.log(`   Request ID: ${payload.requestId}`);
+  console.log(`   Settlement: ${payload.notes?.slice(0, 100)}...`);
   await publish(topicId, {
     type: "TRADE_EXECUTED",
     payload,
   });
-
-  // eslint-disable-next-line no-console
-  console.log(
-    `✅ TRADE_EXECUTED published to HCS topic | topic=${topicId} requestId=${payload.requestId}`
-  );
+  console.log('   Execution published to HCS');
 }
 
 export function receiveTradeRequest(

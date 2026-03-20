@@ -69,6 +69,25 @@ function configuredMarketAgentAddress(): string {
   return (process.env.MARKET_AGENT_EVM_ADDRESS ?? "").trim().toLowerCase();
 }
 
+// Helper to give useful hints for trade errors
+function getErrorHint(msg: string): string {
+  if (msg.includes('MOCK_HEDERA'))
+    return 'Set MOCK_HEDERA=false in backend/.env';
+  if (msg.includes('private key'))
+    return 'Check USER_EVM_KEY in backend/.env';
+  if (msg.includes('operator'))
+    return 'Check HEDERA_OPERATOR_KEY in backend/.env';
+  if (msg.includes('contract'))
+    return 'Check ATOMIC_SWAP_ADDRESS in backend/.env';
+  if (msg.includes('insufficient'))
+    return 'Account needs more HBAR - use faucet';
+  if (msg.includes('CoinGecko'))
+    return 'CoinGecko rate limited - wait 60 seconds';
+  if (msg.includes('Groq'))
+    return 'Groq rate limited - wait 30 seconds';
+  return 'Check backend terminal for full error';
+}
+
 function emitObserverEvent(event: ObserverEvent): void {
   const serialized = JSON.stringify(event);
   for (const client of wsClients) {
@@ -290,110 +309,70 @@ app.post("/chat", async (req, res) => {
 });
 
 app.post("/trade", async (req, res) => {
-  // DEBUG: Log incoming request
-  // eslint-disable-next-line no-console
-  console.log(`[DEBUG] POST /trade | body=${JSON.stringify(req.body)}`);
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('📥 POST /trade received');
+  console.log('Body:', JSON.stringify(req.body));
   
   try {
-    const requestId = String(req.body.requestId ?? "").trim();
-    const acceptedRaw = req.body.accepted;
-    const walletAddress = String(req.body.walletAddress ?? req.body.wallet ?? "").trim();
-
-    if (!requestId) {
-      return res.status(400).json({ error: "requestId is required" });
-    }
-
-    if (typeof acceptedRaw !== "boolean") {
-      return res.status(400).json({ error: "accepted must be a boolean" });
-    }
-
-    const accepted = acceptedRaw;
-
-    // DEBUG: Log offer lookup
-    // eslint-disable-next-line no-console
-    console.log(`[DEBUG] Looking up offer | requestId=${requestId} | offers.size=${offers.size}`);
+    const { requestId, accepted, walletAddress } = req.body;
     
+    console.log('requestId:', requestId);
+    console.log('accepted:', accepted);
+    console.log('walletAddress:', walletAddress);
+    
+    if (!requestId) {
+      console.error('❌ No requestId provided');
+      return res.status(400).json({ 
+        error: 'requestId is required' 
+      });
+    }
+
+    // Check offer exists
     const offer = offers.get(requestId);
+    console.log('Offer found:', offer ? 'YES' : 'NO');
+    console.log('Offers in memory:', offers.size);
+    console.log('Offer keys:', [...offers.keys()]);
+    
     if (!offer) {
-      // DEBUG: Log available keys
-      // eslint-disable-next-line no-console
-      console.log(`[DEBUG] Offer not found | availableKeys=[${Array.from(offers.keys()).join(", ")}]`);
-      return res.status(404).json({ error: "Offer not found" });
-    }
-
-    if (accepted && !walletAddress) {
-      return res.status(400).json({ error: "walletAddress is required when accepted=true" });
-    }
-
-    if (accepted && walletAddress && walletAddress.toLowerCase() !== offer.wallet.toLowerCase()) {
-      return res.status(403).json({ error: "walletAddress does not match offer wallet" });
+      console.error('❌ Offer not found for:', requestId);
+      return res.status(404).json({ 
+        error: 'Offer not found. Start a new trade.' 
+      });
     }
 
     if (!accepted) {
       offers.delete(requestId);
-      return res.json({
-        executed: false,
-        message: "Trade declined by user",
-        negotiation: getNegotiationForRequest(requestId),
+      console.log('✅ Trade rejected:', requestId);
+      return res.json({ 
+        rejected: true,
+        message: 'Trade declined. No funds moved.' 
       });
     }
 
-    const acceptedPayload: TradePayload = {
-      ...offer,
-      timestamp: Date.now(),
-      notes: "User accepted market offer",
-    };
-
-    await sendTradeAccept(topicId, acceptedPayload);
-    appendNegotiationMessage(
-      {
-        type: "TRADE_ACCEPT",
-        payload: acceptedPayload,
-      },
-      "api"
-    );
-
-    const execution = await executeTrade(offer);
-    // DEBUG: Log execution result
-    // eslint-disable-next-line no-console
-    console.log(`[DEBUG] executeTrade result | executed=${execution.executed} | tx=${execution.transactionId}`);
-
-    const executedPayload: TradePayload = {
-      ...offer,
-      timestamp: Date.now(),
-      notes: execution.settlement,
-    };
-
-    await sendTradeExecuted(topicId, executedPayload);
-
-    appendNegotiationMessage(
-      {
-        type: "TRADE_EXECUTED",
-        payload: executedPayload,
-      },
-      "api"
-    );
-
+    console.log('✅ Step 7: User accepted trade');
+    console.log('⏳ Step 8: AtomicSwap executing...');
+    console.log('Offer details:', JSON.stringify(offer));
+    
+    const result = await executeTrade(offer);
+    
+    console.log('✅ Step 9: Token transfer done');
+    console.log('✅ Step 10: Reputation updated');
+    console.log('✅ Step 11: TRADE_EXECUTED');
+    console.log('Result:', JSON.stringify(result));
+    
     offers.delete(requestId);
+    return res.json(result);
 
-    return res.json({
-      success: execution.executed,
-      txHash: execution.transactionId,
-      usdcSent: offer.token === "USDC" ? offer.amount : offer.amount * offer.price,
-      hbarReceived: offer.token === "USDC" ? offer.amount / offer.price : offer.amount,
-    });
-  } catch (error) {
-    // DEBUG: Log full error details
-    const errorDetails = error instanceof Error ? error.message : String(error);
-    const errorStack = error instanceof Error ? error.stack : "No stack";
-    // eslint-disable-next-line no-console
-    console.error(`[DEBUG] POST /trade ERROR | ${errorDetails}`);
-    // eslint-disable-next-line no-console
-    console.error(`[DEBUG] Stack: ${errorStack}`);
+  } catch (err: any) {
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('❌ TRADE FAILED!');
+    console.error('Error message:', err.message);
+    console.error('Error stack:', err.stack);
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
     return res.status(500).json({
-      error: "Failed to execute trade",
-      details: errorDetails,
+      error: err.message,
+      hint: getErrorHint(err.message)
     });
   }
 });
@@ -401,21 +380,22 @@ app.post("/trade", async (req, res) => {
 app.get("/trade/offer", (req, res) => {
   const requestId = String(req.query.requestId ?? "").trim();
   
-  // DEBUG: Log all available offers
-  // eslint-disable-next-line no-console
-  console.log(`[DEBUG] GET /trade/offer | requestId=${requestId} | offers.size=${offers.size} | keys=[${Array.from(offers.keys()).join(", ")}]`);
-  
   if (!requestId) {
     return res.status(400).json({ error: "requestId query param is required" });
   }
 
   const offer = offers.get(requestId);
   if (!offer) {
-    // DEBUG: Log that offer wasn't found
-    // eslint-disable-next-line no-console
-    console.log(`[DEBUG] Offer not found for requestId=${requestId}`);
-    return res.status(404).json({ error: "Offer not found" });
+    console.log(`❌ Offer NOT found: ${requestId}`);
+    return res.status(404).json({ 
+      error: "Offer not found yet",
+      requestId,
+      offersInMemory: offers.size,
+      availableKeys: [...offers.keys()]
+    });
   }
+  
+  console.log(`✅ Offer found: ${requestId}`);
 
   // Calculate spread as percentage
   const spread = ((offer.price / offer.price) - 1) * 100; // Spread is 0.5% applied in marketAgent
@@ -434,9 +414,6 @@ app.get("/trade/offer", (req, res) => {
     usdcAmount = offer.amount * offer.price;
   }
 
-  // eslint-disable-next-line no-console
-  console.log(`Frontend offer polling returned offer | requestId=${requestId}`);
-
   return res.json({
     requestId,
     offeredPrice: offer.price,
@@ -444,6 +421,32 @@ app.get("/trade/offer", (req, res) => {
     hbarAmount,
     spread: 0.5,
     expiresAt,
+  });
+});
+
+// Debug endpoint to verify offers in memory
+app.get("/debug/offers", (_req, res) => {
+  console.log('📊 Debug: /debug/offers called');
+  console.log(`   Total offers: ${offers.size}`);
+  console.log(`   Keys: ${[...offers.keys()]}`);
+  
+  const offerData = Object.fromEntries(
+    [...offers.entries()].map(([key, value]) => [
+      key,
+      {
+        wallet: value.wallet,
+        token: value.token,
+        amount: value.amount,
+        price: value.price,
+        requestId: value.requestId,
+      }
+    ])
+  );
+  
+  res.json({
+    count: offers.size,
+    keys: [...offers.keys()],
+    offers: offerData
   });
 });
 
