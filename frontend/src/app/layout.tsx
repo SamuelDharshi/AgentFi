@@ -1,5 +1,29 @@
 // Suppress WalletConnect WebSocket errors
 if (typeof window !== 'undefined') {
+  const originalConsoleWarn = window.console.warn.bind(window.console)
+  const originalConsoleError = window.console.error.bind(window.console)
+
+  const shouldSuppressConsoleMessage = (args: unknown[]): boolean =>
+    args.some(
+      (value) =>
+        typeof value === 'string' &&
+        (value.includes('Removing unpermitted intrinsics') || value.includes('SES'))
+    )
+
+  window.console.warn = (...args: unknown[]) => {
+    if (shouldSuppressConsoleMessage(args)) {
+      return
+    }
+    originalConsoleWarn(...args)
+  }
+
+  window.console.error = (...args: unknown[]) => {
+    if (shouldSuppressConsoleMessage(args)) {
+      return
+    }
+    originalConsoleError(...args)
+  }
+
   const originalError = window.onerror
   window.onerror = (msg, src, line, col, err) => {
     if (
@@ -34,7 +58,8 @@ if (typeof window !== 'undefined') {
 }
 
 import type { Metadata } from "next";
-import ConnectWallet from "@/components/ConnectWallet";
+import { AppNavbar } from "@/components/AppNavbar";
+import { ShellFooter } from "@/components/ShellFooter";
 import { WalletProvider } from "@/context/WalletContext";
 import "./globals.css";
 
@@ -49,44 +74,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" data-scroll-behavior="smooth">
       <body className="antialiased pt-16 animated-bg">
-        {/* Top violet progress line */}
         <div className="top-progress-line" />
-        
         <WalletProvider>
-          <nav className="fixed top-0 left-0 w-full z-50 border-b-2 border-violet-400 bg-black/95 backdrop-blur-lg shadow-lg shadow-violet-500/50">
-            <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-              <a href="/" className="flex items-center gap-2 group">
-                <div className="w-8 h-8 bg-violet-500 flex items-center justify-center rounded border border-violet-300 shadow-lg shadow-violet-500/80">
-                  <span className="text-black font-black text-xl">🤖</span>
-                </div>
-                <span className="font-bold tracking-tighter text-lg text-violet-400 group-hover:text-violet-300 transition-all glow-text">
-                  AGENTFI
-                </span>
-              </a>
-
-              <div className="hidden md:flex items-center gap-6">
-                {[
-                  { name: 'DASHBOARD', path: '/' },
-                  { name: 'CHAT', path: '/chat' },
-                  { name: 'TRADE', path: '/trade' },
-                  { name: 'OBSERVER', path: '/agent-status' },
-                ].map((item) => (
-                  <a
-                    key={item.path}
-                    href={item.path}
-                    className="text-sm font-bold tracking-widest transition-all text-violet-300 hover:text-violet-400 hover:shadow-lg hover:shadow-violet-500/50 px-2 py-1"
-                  >
-                    {item.name}
-                  </a>
-                ))}
-              </div>
-
-              <ConnectWallet />
-            </div>
-          </nav>
-          {children}
+          <AppNavbar />
+          <div className="relative min-h-screen">
+            {children}
+            <ShellFooter />
+          </div>
         </WalletProvider>
       </body>
     </html>

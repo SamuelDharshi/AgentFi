@@ -1,117 +1,81 @@
-import type { TradeExecutionResponse, TradePayload } from "@/lib/api";
-
-export interface StoredTradeEntry {
-  date: string;
+export interface TradeHistoryEntry {
   requestId: string;
+  token: string;
+  amount: number;
+  price: number;
+  buyToken: string;
+  txHash: string;
   usdcSent: number;
   hbarReceived: number;
-  txHash: string;
-  soldAmount?: number;
-  soldToken?: string;
-  receivedAmount?: number;
-  receivedToken?: string;
+  settlement: string | null;
+  status: "executed" | "rejected";
+  timestamp: number;
 }
 
 const STORAGE_KEY = "agentfi_trades";
-const STORAGE_LIMIT = 50;
 
-function safeParseTradeHistory(rawValue: string | null): StoredTradeEntry[] {
-  if (!rawValue) {
+function isTradeHistoryEntry(value: unknown): value is TradeHistoryEntry {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<TradeHistoryEntry>;
+  return (
+    typeof candidate.requestId === "string" &&
+    typeof candidate.token === "string" &&
+    typeof candidate.amount === "number" &&
+    typeof candidate.price === "number" &&
+    typeof candidate.buyToken === "string" &&
+    typeof candidate.txHash === "string" &&
+    typeof candidate.usdcSent === "number" &&
+    typeof candidate.hbarReceived === "number" &&
+    (candidate.status === "executed" || candidate.status === "rejected") &&
+    typeof candidate.timestamp === "number"
+  );
+}
+
+export function loadTradeHistory(): TradeHistoryEntry[] {
+  if (typeof window === "undefined") {
     return [];
   }
 
   try {
-    const parsed = JSON.parse(rawValue) as unknown;
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) {
       return [];
     }
 
-    return parsed.filter((item): item is StoredTradeEntry => {
-      return Boolean(
-        item &&
-          typeof item === "object" &&
-          typeof (item as StoredTradeEntry).date === "string" &&
-          typeof (item as StoredTradeEntry).txHash === "string"
-      );
-    });
+    return parsed
+      .filter(isTradeHistoryEntry)
+      .sort((left, right) => right.timestamp - left.timestamp);
   } catch {
     return [];
   }
 }
 
-export function readTradeHistory(): StoredTradeEntry[] {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  return safeParseTradeHistory(window.localStorage.getItem(STORAGE_KEY));
-}
-
-export function writeTradeHistory(entries: StoredTradeEntry[]): void {
+export function saveTradeHistory(entries: TradeHistoryEntry[]): void {
   if (typeof window === "undefined") {
     return;
   }
 
-  window.localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify(entries.slice(0, STORAGE_LIMIT))
-  );
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(0, 50)));
+  window.dispatchEvent(new Event("agentfi-trade-history-updated"));
 }
 
-export function appendTradeHistory(entry: StoredTradeEntry): void {
-  const entries = readTradeHistory();
-  entries.unshift(entry);
-  writeTradeHistory(entries);
+export function appendTradeHistory(entry: TradeHistoryEntry): void {
+  const next = [
+    entry,
+    ...loadTradeHistory().filter((existing) => existing.requestId !== entry.requestId),
+  ];
+
+  saveTradeHistory(next);
 }
 
-export function createTradeHistoryEntry(
-  offer: TradePayload,
-  result: TradeExecutionResponse
-): StoredTradeEntry {
-  const soldAmount = offer.amount;
-  const soldToken = offer.token;
-  const receivedToken = offer.buyToken ?? (soldToken === "USDC" ? "HBAR" : "USDC");
-  const fallbackReceivedAmount =
-    soldToken === "USDC" ? offer.amount / offer.price : offer.amount * offer.price;
-
-  const receivedAmount =
-    typeof result.hbarReceived === "number" ? result.hbarReceived : fallbackReceivedAmount;
-
-  const txHash = result.txHash ?? result.transactionId ?? "";
-
-  return {
-    date: new Date().toISOString(),
-    requestId: offer.requestId,
-    usdcSent: soldToken === "USDC" ? soldAmount : result.usdcSent ?? soldAmount,
-    hbarReceived: soldToken === "USDC" ? receivedAmount : soldAmount,
-    txHash,
-    soldAmount,
-    soldToken,
-    receivedAmount,
-    receivedToken,
-  };
-}
-
-export function formatTradeDate(isoDate: string): string {
-  return new Date(isoDate).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-export function formatTradeTime(isoDate: string): string {
-  return new Date(isoDate).toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-export function shortenHash(hash: string): string {
-  if (!hash || hash.length <= 16) {
-    return hash;
-  }
-
-  return `${hash.slice(0, 10)}...${hash.slice(-6)}`;
+export function getTradeHistoryHashScanUrl(txHash: string): string {
+  return `https://hashscan.io/testnet/transaction/${txHash}`;
 }

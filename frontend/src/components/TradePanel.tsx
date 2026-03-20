@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { TradeExecutionResponse, TradePayload, executeTrade } from "@/lib/api";
+import { appendTradeHistory } from "@/lib/tradeHistory";
 
 interface TradePanelProps {
   requestId: string;
@@ -101,6 +102,25 @@ export function TradePanel({
       const data = await executeTrade(requestId, accepted, walletAccountId);
       setResult(data);
       onNegotiationUpdate(data.negotiation || []);
+
+      if (accepted && data.executed && offer) {
+        const txHash = data.txHash ?? data.transactionId ?? "";
+        if (txHash) {
+          appendTradeHistory({
+            requestId,
+            token: offer.token,
+            amount: offer.amount,
+            price: offer.price,
+            buyToken: offer.buyToken ?? "HBAR",
+            txHash,
+            usdcSent: data.usdcSent ?? (offer.token === "USDC" ? offer.amount : offer.amount * offer.price),
+            hbarReceived: data.hbarReceived ?? (offer.token === "USDC" ? offer.amount / offer.price : offer.amount),
+            settlement: data.settlement ?? null,
+            status: "executed",
+            timestamp: Date.now(),
+          });
+        }
+      }
       
       if (!accepted) {
         // Clear storage and URL on reject
@@ -127,12 +147,14 @@ export function TradePanel({
 
   const canAct = Boolean(requestId && offer && !offerError && !isExpired && !result);
 
-  const txHashShortened = result?.transactionId 
-    ? `${result.transactionId.slice(0, 10)}...${result.transactionId.slice(-6)}`
+  const transactionHash = result?.txHash ?? result?.transactionId ?? null;
+
+  const txHashShortened = transactionHash
+    ? `${transactionHash.slice(0, 10)}...${transactionHash.slice(-6)}`
     : null;
 
-  const hashScanUrl = result?.transactionId
-    ? `https://hashscan.io/testnet/transaction/${result.transactionId}`
+  const hashScanUrl = transactionHash
+    ? `https://hashscan.io/testnet/transaction/${transactionHash}`
     : null;
 
   return (
@@ -258,30 +280,39 @@ export function TradePanel({
       {result?.executed && (
         <div className="mt-6 p-5 border-2 border-emerald-400/50 bg-emerald-400/10 rounded-lg">
           <p className="text-emerald-300 font-bold text-lg mb-4 text-center">✅ TRADE COMPLETE</p>
-          
-          <div className="space-y-3 text-sm mb-4">
-            <div className="flex justify-between items-center py-2 border-b border-emerald-400/20">
-              <span className="text-gray-400">YOU SENT</span>
-              <span className="text-white font-bold text-lg">{offer?.amount} {offer?.token}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-emerald-400/20">
-              <span className="text-gray-400">YOU GOT</span>
-              <span className="text-emerald-300 font-bold text-lg">
-                {Math.round(offer?.price || 0)} {offer?.buyToken ?? "HBAR"}
-              </span>
-            </div>
-            <div className="flex justify-between items-center py-2">
-              <span className="text-gray-400">TX HASH</span>
-              <a 
-                href={hashScanUrl || "#"}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-violet-300 hover:text-violet-200 font-mono text-xs"
-              >
-                {txHashShortened}
-              </a>
-            </div>
-          </div>
+
+          {(() => {
+            const sentAmount = result.usdcSent ?? (offer?.token === "USDC" ? offer?.amount ?? 0 : (offer?.amount ?? 0) * (offer?.price ?? 0));
+            const receivedAmount = result.hbarReceived ?? (offer?.token === "USDC" ? (offer?.amount ?? 0) / (offer?.price ?? 1) : offer?.amount ?? 0);
+
+            return (
+              <div className="space-y-3 text-sm mb-4">
+                <div className="flex justify-between items-center py-2 border-b border-emerald-400/20">
+                  <span className="text-gray-400">YOU SENT</span>
+                  <span className="text-white font-bold text-lg">
+                    {sentAmount} {offer?.token}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-emerald-400/20">
+                  <span className="text-gray-400">YOU GOT</span>
+                  <span className="text-emerald-300 font-bold text-lg">
+                    {receivedAmount} {offer?.buyToken ?? "HBAR"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-2">
+                  <span className="text-gray-400">TX HASH</span>
+                  <a 
+                    href={hashScanUrl || "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-violet-300 hover:text-violet-200 font-mono text-xs"
+                  >
+                    {txHashShortened}
+                  </a>
+                </div>
+              </div>
+            );
+          })()}
           
           {hashScanUrl && (
             <a

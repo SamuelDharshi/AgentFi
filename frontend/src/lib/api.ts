@@ -29,14 +29,14 @@ export interface ChatResponse {
 
 export interface TradeExecutionResponse {
   executed: boolean;
+  success?: boolean;
   transactionId?: string;
   txHash?: string;
+  usdcSent?: number;
+  hbarReceived?: number;
   settlement?: string;
   message?: string;
   negotiation?: TradeMessage[];
-  success?: boolean;
-  usdcSent?: number;
-  hbarReceived?: number;
 }
 
 export interface TradeOfferResponse {
@@ -59,16 +59,27 @@ export interface AgentStatusResponse {
   negotiationCount: number;
 }
 
-export interface BackendHealthResponse {
+export interface HealthResponse {
   status: string;
   network: string;
   topic: string;
 }
 
+export interface DebugOfferRecord {
+  wallet: string;
+  token: string;
+  amount: number;
+  price: number;
+  buyToken: string | null;
+  timestamp: number;
+  requestId: string;
+  notes: string | null;
+}
+
 export interface DebugOffersResponse {
   count: number;
   keys: string[];
-  offers: Record<string, TradePayload>;
+  offers: DebugOfferRecord[];
 }
 
 const api = axios.create({
@@ -99,20 +110,7 @@ export async function executeTrade(
     walletAddress: walletAddress ?? undefined,
     wallet: walletAddress ?? undefined,
   });
-
-  const data = response.data;
-
-  return {
-    executed: data.executed ?? data.success ?? false,
-    transactionId: data.transactionId ?? data.txHash,
-    txHash: data.txHash ?? data.transactionId,
-    settlement: data.settlement,
-    message: data.message,
-    negotiation: data.negotiation,
-    success: data.success ?? data.executed ?? false,
-    usdcSent: data.usdcSent,
-    hbarReceived: data.hbarReceived,
-  };
+  return response.data;
 }
 
 export async function getTradeOffer(requestId: string): Promise<TradeOfferResponse> {
@@ -122,13 +120,13 @@ export async function getTradeOffer(requestId: string): Promise<TradeOfferRespon
   return response.data;
 }
 
-export async function getHealth(): Promise<BackendHealthResponse> {
-  const response = await api.get<BackendHealthResponse>("/health");
+export async function getAgentStatus(): Promise<AgentStatusResponse> {
+  const response = await api.get<AgentStatusResponse>("/agent-status");
   return response.data;
 }
 
-export async function getAgentStatus(): Promise<AgentStatusResponse> {
-  const response = await api.get<AgentStatusResponse>("/agent-status");
+export async function getHealth(): Promise<HealthResponse> {
+  const response = await api.get<HealthResponse>("/health");
   return response.data;
 }
 

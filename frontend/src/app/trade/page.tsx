@@ -4,6 +4,7 @@ import { isAxiosError } from "axios";
 import { useEffect, useState } from "react";
 import { NegotiationFeed } from "@/components/NegotiationFeed";
 import { ReputationBoard } from "@/components/ReputationBoard";
+import { TradeNegotiationLog } from "@/components/TradeNegotiationLog";
 import { TradePanel } from "@/components/TradePanel";
 import { useWallet } from "@/context/WalletContext";
 import { TradeMessage, TradePayload, getTradeOffer } from "@/lib/api";
@@ -179,18 +180,24 @@ export default function TradePage() {
         </p>
       </div>
 
-      <div className="mt-6 space-y-5 max-w-4xl mx-auto">
-        <TradePanel
-          requestId={requestId}
-          offer={offer}
-          offerPolling={offerPolling}
-          offerError={offerError}
-          walletAccountId={accountId}
-          isWalletConnected={isConnected}
-          onNegotiationUpdate={(items) => setMessages(items || [])}
-        />
-        <NegotiationFeed messages={messages} />
-        <ReputationBoard marketAgents={marketAgents} />
+      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+        <div className="space-y-5">
+          <TradePanel
+            requestId={requestId}
+            offer={offer}
+            offerPolling={offerPolling}
+            offerError={offerError}
+            walletAccountId={accountId}
+            isWalletConnected={isConnected}
+            onNegotiationUpdate={(items) => setMessages(items || [])}
+          />
+          <NegotiationFeed messages={messages} />
+        </div>
+
+        <div className="space-y-5">
+          <TradeNegotiationLog requestId={requestId} />
+          <ReputationBoard marketAgents={marketAgents} />
+        </div>
       </div>
     </main>
   );
