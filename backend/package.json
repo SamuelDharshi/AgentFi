@@ -4,10 +4,10 @@
   "description": "AgentFi backend services",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "npm run build && node dist/server.js",
-    "dev:watch": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
+    "dev": "npm run build && node dist/server.js",
+    "dev:watch": "tsx watch src/server.ts",
     "orchestrate:headless": "tsx src/orchestration/headlessLoop.ts",
     "test:e2e-live": "jest --config jest.e2e.config.cjs --runInBand",
     "test:e2e-live:verbose": "jest --config jest.e2e.config.cjs --runInBand --verbose",

@@ -4,7 +4,8 @@
   "description": "AgentFi - Agent-Native OTC Trading Platform on Hedera",
   "private": true,
   "scripts": {
-    "install:all": "npm install && npm install --prefix backend && npm install --prefix contracts && npm install --prefix frontend",
+    "build": "npm run build --prefix backend && npm run build --prefix frontend",
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
     "dev": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
     "dev:backend": "npm run dev --prefix backend",
     "dev:frontend": "npm run dev --prefix frontend",
@@ -16,7 +17,7 @@
     "test:backend": "npm run test:e2e-live --prefix backend",
     "test:contracts": "npm run test --prefix contracts",
     "deploy:contracts": "npm run deploy --prefix contracts",
-    "start": "concurrently \"npm start --prefix backend\" \"npm start --prefix frontend\"",
+    "start": "npm run build && concurrently \"npm start --prefix backend\" \"npm start --prefix frontend\"",
     "clean": "rimraf backend/dist frontend/.next contracts/typechain-types contracts/artifacts",
     "setup": "node scripts/setup.js",
     "verify": "node scripts/quickcheck.js",
