@@ -8,7 +8,7 @@ import { useWallet } from "@/context/WalletContext";
 
 const NAV_ITEMS = [
   { href: "/home", label: "HOME" },
-  { href: "/", label: "DASHBOARD" },
+  { href: "/dashboard", label: "DASHBOARD" },
   { href: "/chat", label: "CHAT" },
   { href: "/trade", label: "TRADE" },
   { href: "/history", label: "HISTORY" },
