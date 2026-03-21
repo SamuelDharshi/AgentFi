@@ -37,64 +37,26 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(() => {
     if (isConnecting || isConnected) return
-    setIsConnecting(true)
 
-    try {
-      const { HashConnect } = await import('hashconnect')
-      const { LedgerId } = await import('@hashgraph/sdk')
+    const id = prompt(
+      '🔗 Enter your Hedera Account ID:\n\n' +
+      'Example: 0.0.8150748\n\n' +
+      'Find it at portal.hedera.com'
+    )
 
-      const hc = new HashConnect(
-        LedgerId.TESTNET,
-        process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'agentfi-demo',
-        {
-          name: 'AgentFi',
-          description: 'AI Agent OTC Trading on Hedera',
-          icons: [],
-          url: typeof window !== 'undefined'
-            ? window.location.origin
-            : 'https://agentfi.vercel.app'
-        },
-        false
-      )
+    if (!id) return
 
-      await hc.init()
-
-      // Set timeout - stop loading after 2 min
-      const timeout = setTimeout(() => {
-        setIsConnecting(false)
-      }, 120000)
-
-      hc.pairingEvent.once((data: any) => {
-        clearTimeout(timeout)
-        const id = data?.accountIds?.[0]
-        if (id) {
-          setAccountId(id)
-          setIsConnected(true)
-          localStorage.setItem('agentfi_wallet', id)
-        }
-        setIsConnecting(false)
-      })
-
-      hc.openPairingModal()
-
-    } catch (err: any) {
-      console.error('Wallet error:', err)
-      setIsConnecting(false)
-
-      // Show manual input as fallback
-      const manual = prompt(
-        'HashPack popup failed.\n\n' +
-        'Enter your Hedera Account ID manually:\n' +
-        '(e.g. 0.0.12345)'
-      )
-      if (manual && manual.startsWith('0.0.')) {
-        setAccountId(manual)
-        setIsConnected(true)
-        localStorage.setItem('agentfi_wallet', manual)
-      }
+    const trimmed = id.trim()
+    if (!trimmed.startsWith('0.0.')) {
+      alert('Invalid account ID. Must start with 0.0.')
+      return
     }
+
+    setAccountId(trimmed)
+    setIsConnected(true)
+    localStorage.setItem('agentfi_wallet', trimmed)
   }, [isConnecting, isConnected])
 
   const disconnect = useCallback(() => {
