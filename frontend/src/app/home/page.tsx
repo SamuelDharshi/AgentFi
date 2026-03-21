@@ -82,7 +82,7 @@ export default function HomePage() {
             <Link href="/chat" className="btn-cyan execute-btn">
               START TRADING
             </Link>
-            <Link href="/" className="btn-outline">
+            <Link href="/dashboard" className="btn-outline">
               VIEW DASHBOARD
             </Link>
           </div>

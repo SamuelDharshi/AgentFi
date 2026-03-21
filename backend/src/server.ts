@@ -382,6 +382,49 @@ app.get("/trade/offer", (req, res) => {
   });
 });
 
+app.get("/trade/offers", (_req, res) => {
+  const tokenFilter = String(_req.query.token ?? "").trim().toUpperCase();
+  const buyTokenFilter = String(_req.query.buyToken ?? "").trim().toUpperCase();
+  const excludeRequestId = String(_req.query.excludeRequestId ?? "").trim();
+
+  const offerList = [...offers.values()]
+    .filter((offer) => {
+      if (excludeRequestId && offer.requestId === excludeRequestId) {
+        return false;
+      }
+
+      if (tokenFilter && offer.token.trim().toUpperCase() !== tokenFilter) {
+        return false;
+      }
+
+      if (buyTokenFilter) {
+        const buyToken = (offer.buyToken ?? "HBAR").trim().toUpperCase();
+        if (buyToken !== buyTokenFilter) {
+          return false;
+        }
+      }
+
+      return true;
+    })
+    .sort((left, right) => right.timestamp - left.timestamp)
+    .map((offer) => ({
+      wallet: offer.wallet,
+      token: offer.token,
+      amount: offer.amount,
+      price: offer.price,
+      buyToken: offer.buyToken ?? null,
+      timestamp: offer.timestamp,
+      requestId: offer.requestId,
+      notes: offer.notes ?? null,
+    }));
+
+  res.json({
+    count: offerList.length,
+    offers: offerList,
+    newest: offerList[0] ?? null,
+  });
+});
+
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",

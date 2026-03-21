@@ -13,6 +13,7 @@ interface TradePanelProps {
   walletAccountId: string | null;
   isWalletConnected: boolean;
   onNegotiationUpdate: (messages: TradeExecutionResponse["negotiation"]) => void;
+  onExecutionResult?: (result: TradeExecutionResponse) => void;
 }
 
 const OFFER_TTL_SECONDS = 300; // 5 minutes
@@ -25,6 +26,7 @@ export function TradePanel({
   walletAccountId,
   isWalletConnected,
   onNegotiationUpdate,
+  onExecutionResult,
 }: TradePanelProps) {
   const router = useRouter();
   const [loadingAction, setLoadingAction] = useState<"accept" | "reject" | null>(null);
@@ -33,6 +35,15 @@ export function TradePanel({
   const [countdown, setCountdown] = useState(OFFER_TTL_SECONDS);
   const [isExpired, setIsExpired] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setResult(null);
+    setError(null);
+    setLoadingAction(null);
+    setIsSubmitting(false);
+    setCountdown(OFFER_TTL_SECONDS);
+    setIsExpired(false);
+  }, [requestId]);
 
   // Countdown timer with expiry handling
   useEffect(() => {
@@ -102,6 +113,7 @@ export function TradePanel({
       const data = await executeTrade(requestId, accepted, walletAccountId);
       setResult(data);
       onNegotiationUpdate(data.negotiation || []);
+      onExecutionResult?.(data);
 
       if (accepted && data.executed && offer) {
         const txHash = data.txHash ?? data.transactionId ?? "";
@@ -123,14 +135,6 @@ export function TradePanel({
       }
       
       if (!accepted) {
-        // Clear storage and URL on reject
-        localStorage.removeItem("agentfi:lastRequestId");
-        // Clear URL params
-        if (typeof window !== 'undefined') {
-          const url = new URL(window.location.href);
-          url.searchParams.delete('requestId');
-          window.history.replaceState({}, '', url.toString());
-        }
         setResult({
           ...data,
           executed: false,
@@ -310,6 +314,12 @@ export function TradePanel({
                     {txHashShortened}
                   </a>
                 </div>
+                {result.settlement ? (
+                  <div className="rounded-lg border border-emerald-400/20 bg-black/20 p-3 text-xs text-emerald-100/90">
+                    <p className="mb-1 uppercase tracking-[0.2em] text-emerald-200/70">Settlement</p>
+                    <p className="font-mono leading-relaxed break-all">{result.settlement}</p>
+                  </div>
+                ) : null}
               </div>
             );
           })()}

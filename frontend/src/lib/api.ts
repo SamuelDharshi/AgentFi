@@ -82,6 +82,12 @@ export interface DebugOffersResponse {
   offers: DebugOfferRecord[];
 }
 
+export interface LiveOffersResponse {
+  count: number;
+  newest: DebugOfferRecord | null;
+  offers: DebugOfferRecord[];
+}
+
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001",
 });
@@ -132,6 +138,17 @@ export async function getHealth(): Promise<HealthResponse> {
 
 export async function getDebugOffers(): Promise<DebugOffersResponse> {
   const response = await api.get<DebugOffersResponse>("/debug/offers");
+  return response.data;
+}
+
+export async function getLiveOffers(params: {
+  token?: string;
+  buyToken?: string;
+  excludeRequestId?: string;
+} = {}): Promise<LiveOffersResponse> {
+  const response = await api.get<LiveOffersResponse>("/trade/offers", {
+    params,
+  });
   return response.data;
 }
 
