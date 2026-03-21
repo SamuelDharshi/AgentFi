@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import HBARPriceCard from "@/components/HBARPriceCard";
+import { useEffect, useRef, useState } from "react";
 import { getAgentStatus, getHealth, AgentStatusResponse } from "@/lib/api";
 
 type DashboardMetrics = {
@@ -12,6 +11,63 @@ type DashboardMetrics = {
   lastActivity: string;
   network: string;
 };
+
+const TradingViewWidget = () => {
+  const container = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!container.current) return
+
+    container.current.innerHTML = ''
+
+    const widget = document.createElement('div')
+    widget.className = 'tradingview-widget-container__widget'
+    widget.style.width = '100%'
+    widget.style.height = '100%'
+
+    container.current.appendChild(widget)
+
+    const script = document.createElement('script')
+    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js'
+    script.type = 'text/javascript'
+    script.async = true
+    script.innerHTML = JSON.stringify({
+      autosize: true,
+      symbol: 'CRYPTO:HBARUSD',
+      interval: '15',
+      timezone: 'Etc/UTC',
+      theme: 'dark',
+      style: '1',
+      locale: 'en',
+      allow_symbol_change: true,
+      calendar: false,
+      support_host: 'https://www.tradingview.com'
+    })
+
+    container.current.appendChild(script)
+
+    return () => {
+      if (container.current) {
+        container.current.innerHTML = ''
+      }
+    }
+  }, [])
+
+  return (
+    <div 
+      className="tradingview-widget-container"
+      ref={container}
+      style={{ 
+        height: '100%',
+        minHeight: '500px',
+        width: '100%',
+        border: '1px solid rgba(168,85,247,0.3)',
+        borderRadius: '8px',
+        overflow: 'hidden'
+      }}
+    />
+  )
+}
 
 function formatRelativeTime(timestamp: number | null, now: number): string {
   if (!timestamp) {
@@ -130,14 +186,14 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,0.95fr)]">
-        <section className="overflow-hidden rounded-4xl border border-violet-400/20 bg-black/55 shadow-[0_24px_80px_rgba(2,6,23,0.72)] backdrop-blur-2xl">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,0.95fr)] lg:items-stretch">
+        <section className="flex min-h-140 flex-col overflow-hidden rounded-4xl border border-violet-400/20 bg-black/55 shadow-[0_24px_80px_rgba(2,6,23,0.72)] backdrop-blur-2xl">
           <div className="border-b border-white/10 px-5 py-4">
             <p className="text-[0.65rem] uppercase tracking-[0.35em] text-violet-200/60">HBAR / USD</p>
             <h2 className="mt-2 text-xl font-semibold text-white">Live market price</h2>
           </div>
-          <div className="p-4">
-            <HBARPriceCard />
+          <div className="flex-1 p-4">
+            <TradingViewWidget />
           </div>
         </section>
 

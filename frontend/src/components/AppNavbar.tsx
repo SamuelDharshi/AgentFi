@@ -90,12 +90,11 @@ export function AppNavbar() {
     <nav className="fixed inset-x-0 top-0 z-50 border-b border-violet-400/20 bg-black/85 backdrop-blur-2xl">
       <div className="mx-auto flex h-16 max-w-450 items-center gap-4 px-4 sm:px-6 lg:px-8">
         <Link href="/home" className="group flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-violet-400/30 bg-violet-500/15 text-lg shadow-lg shadow-violet-500/20">
-            ⬡
+          <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-violet-400/20 bg-black/60 shadow shadow-violet-500/10">
+            <img src="/logo.png" alt="AgentFi logo" className="h-full w-full object-cover" />
           </div>
           <div>
             <p className="text-[0.65rem] uppercase tracking-[0.45em] text-violet-200/60">AgentFi</p>
-            <p className="text-sm font-semibold text-white">AI Agent OTC Command</p>
           </div>
         </Link>
 
@@ -122,12 +121,6 @@ export function AppNavbar() {
         </div>
 
         <div className="ml-auto hidden items-center gap-3 lg:flex">
-          <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[0.65rem] font-mono uppercase tracking-[0.28em] text-emerald-100">
-            {networkLabel}
-          </div>
-          <div className="rounded-full border border-violet-400/20 bg-violet-500/10 px-3 py-1 text-[0.65rem] font-mono uppercase tracking-[0.28em] text-violet-100">
-            {offerCount} open offers
-          </div>
           <div ref={walletMenuRef} className="relative">
             {wallet.isConnected ? (
               <button
