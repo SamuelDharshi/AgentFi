@@ -12,18 +12,6 @@ interface AgentMessage {
   timestamp: string;
 }
 
-const AGENT_STEPS = (hbarPrice: number, amount: number, hbarAmount: number) => [
-  { agent: "UserAgent" as const,    text: "Analyzing your trade request..." },
-  { agent: "UserAgent" as const,    text: `Fetching live HBAR price from CoinGecko...` },
-  { agent: "UserAgent" as const,    text: `HBAR price: $${hbarPrice.toFixed(4)}` },
-  { agent: "UserAgent" as const,    text: "Publishing encrypted request to Hedera HCS..." },
-  { agent: "UserAgent" as const,    text: "Waiting for Market Agent response..." },
-  { agent: "MarketAgent" as const,  text: "Received your request ✅" },
-  { agent: "MarketAgent" as const,  text: "Calculating best offer..." },
-  { agent: "MarketAgent" as const,  text: `Offer ready! ${hbarAmount} HBAR for ${amount} USDC` },
-  { agent: "UserAgent" as const,    text: "Offer received! Redirecting to trade page..." },
-];
-
 function formatTime(): string {
   return new Date().toLocaleTimeString("en-US", {
     hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
@@ -65,7 +53,7 @@ export default function ChatPage() {
     steps: { agent: "UserAgent" | "MarketAgent"; text: string }[]
   ) {
     for (const step of steps) {
-      await new Promise<void>((r) => setTimeout(r, 900));
+      await new Promise<void>((r) => setTimeout(r, 1000));
       addMessage(step.agent, step.text);
     }
   }
@@ -101,35 +89,36 @@ export default function ChatPage() {
     addMessage("System", `> USER: ${text}`);
 
     try {
-      // Show first two steps while API call runs in parallel
-      addMessage("UserAgent", "Analyzing your trade request...");
-      addMessage("UserAgent", "Fetching live HBAR price from CoinGecko...");
-
-      // Fire API call
       const dataPromise = sendChat(text, accountId);
-
-      // Small delay before showing price
-      await new Promise<void>((r) => setTimeout(r, 900));
-
       const data = await dataPromise;
 
       const hbarPrice = data.currentPrice > 0 ? data.currentPrice : 0.094;
       const amount = data.amount ?? 10;
       const hbarAmount = Math.round(amount / hbarPrice);
 
-      addMessage("UserAgent", `HBAR price: $${hbarPrice.toFixed(4)}`);
+      const cleanAgentMessages = [
+        { agent: "UserAgent" as const, text: "🤖 UserAgent: Received your request..." },
+        { agent: "UserAgent" as const, text: "🤖 UserAgent: Fetching live HBAR price..." },
+        { agent: "UserAgent" as const, text: `🤖 UserAgent: HBAR price: $${hbarPrice.toFixed(4)}` },
+        { agent: "UserAgent" as const, text: "🤖 UserAgent: Publishing to Hedera HCS..." },
+        { agent: "System" as const, text: "📡 HCS: Message encrypted and published" },
+        { agent: "MarketAgent" as const, text: "🤖 MarketAgent: Received proposal..." },
+        { agent: "MarketAgent" as const, text: "🤖 MarketAgent: Calculating offer..." },
+        { agent: "MarketAgent" as const, text: `🤖 MarketAgent: Offer ready! ~${hbarAmount} HBAR for ${amount} USDC` },
+        { agent: "UserAgent" as const, text: "✅ Redirecting to trade page..." },
+      ];
 
-      const remainingSteps = AGENT_STEPS(hbarPrice, amount, hbarAmount).slice(3);
-      await appendStepsWithDelay(remainingSteps);
+      for (const message of cleanAgentMessages) {
+        await new Promise<void>((r) => setTimeout(r, 1000));
+        addMessage(message.agent, message.text);
+      }
 
       // Store requestId and navigate
       if (typeof window !== "undefined") {
         window.localStorage.setItem("agentfi:lastRequestId", data.requestId);
       }
 
-      setTimeout(() => {
-        router.push(`/trade?requestId=${data.requestId}`);
-      }, 800);
+      router.push(`/trade?requestId=${data.requestId}`);
 
       setInputText("");
     } catch (err) {

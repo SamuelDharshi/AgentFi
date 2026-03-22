@@ -282,40 +282,46 @@ app.post("/trade", async (req, res) => {
     if (!accepted) {
       const rejectCount = rejections.get(requestId) ?? 0;
 
+      if (rejectCount >= 3) {
+        offers.delete(requestId);
+        rejections.delete(requestId);
+        return res.json({
+          rejected: true,
+          final: true,
+          message: "No better offers available",
+        });
+      }
+
       // Increment rejection count
       rejections.set(requestId, rejectCount + 1);
 
-      // Schedule a new offer from MarketAgent after 3 seconds
-      setTimeout(() => {
-        // eslint-disable-next-line no-console
-        console.log(`[Reject] Fetching new offer for ${requestId} (rejection ${rejectCount + 1})`);
-        void (async () => {
-          try {
-            const { evaluateOffer } = await import("./agents/marketAgent");
-            const newOffer = await evaluateOffer(offer);
+      const currentOffer = offers.get(requestId);
+      if (currentOffer) {
+        try {
+          const { evaluateOffer } = await import("./agents/marketAgent");
+          const newOffer = await evaluateOffer(currentOffer, requestId);
+          if (newOffer) {
             const updatedOffer: TradePayload = {
               ...newOffer,
-              requestId: offer.requestId, // Keep same requestId so frontend can poll
+              requestId,
               timestamp: Date.now(),
+              isNewOffer: true,
               notes: `Better offer (attempt ${rejectCount + 1}) | market price refreshed`,
             };
             offers.set(requestId, updatedOffer);
             appendNegotiationMessage({ type: "TRADE_OFFER", payload: updatedOffer }, "local");
-            // eslint-disable-next-line no-console
-            console.log(`[Reject] New offer stored for ${requestId}: ${JSON.stringify({ price: updatedOffer.price, amount: updatedOffer.amount })}`);
-          } catch (err) {
-            // eslint-disable-next-line no-console
-            console.error(`[Reject] Failed to get new offer: ${err instanceof Error ? err.message : String(err)}`);
           }
-        })();
-      }, 3000);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error(`[Reject] Failed to get new offer: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
 
       return res.json({
-        executed: false,
         rejected: true,
         final: false,
-        message: "Searching for better offer...",
-        retryAfter: 3,
+        message: "Finding better offer...",
+        retryAfter: 3000,
         rejectCount: rejectCount + 1,
       });
     }

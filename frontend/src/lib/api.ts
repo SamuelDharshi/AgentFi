@@ -9,6 +9,7 @@ export interface TradePayload {
   timestamp: number;
   requestId: string;
   notes?: string;
+  isNewOffer?: boolean;
 }
 
 export interface TradeMessage {

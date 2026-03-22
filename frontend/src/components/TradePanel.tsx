@@ -22,6 +22,7 @@ type PanelStatus =
   | "rejecting"
   | "searching_new_offer"
   | "offer_found"
+  | "final_rejected"
   | "executed";
 
 const OFFER_TTL_SECONDS = 300; // 5 minutes
@@ -103,20 +104,23 @@ export function TradePanel({
       try {
         const data = await getTradeOffer(requestId);
         if (data && data.offeredPrice) {
+          const isNew = Boolean(data.offer?.isNewOffer);
           const newOfferPayload: TradePayload = {
-            wallet: walletAccountId ?? "",
-            token: "USDC",
-            amount: data.usdcAmount,
-            price: data.offeredPrice,
-            buyToken: "HBAR",
-            timestamp: Date.now(),
-            requestId: data.requestId,
-            notes: `Better offer found! Market price refreshed.`,
+            ...(data.offer ?? {
+              wallet: walletAccountId ?? "",
+              token: "USDC",
+              amount: data.usdcAmount,
+              price: data.offeredPrice,
+              buyToken: "HBAR",
+              timestamp: Date.now(),
+              requestId: data.requestId,
+            }),
+            notes: data.offer?.notes ?? "Better offer found! Market price refreshed.",
           };
           setDisplayOffer(newOfferPayload);
           setCountdown(OFFER_TTL_SECONDS);
           setIsExpired(false);
-          setStatus("offer_found");
+          setStatus(isNew ? "offer_found" : "idle");
           return;
         }
       } catch {
@@ -124,10 +128,10 @@ export function TradePanel({
       }
 
       // Schedule next poll
-      setTimeout(poll, 2000);
+      setTimeout(poll, 3000);
     };
 
-    setTimeout(poll, 2000);
+    setTimeout(poll, 3000);
   }, [requestId, walletAccountId]);
 
   async function submit(accepted: boolean) {
@@ -198,7 +202,12 @@ export function TradePanel({
 
       // Handle rejection response
       if (!accepted) {
-        // Keep searching for better offers until the user accepts one.
+        if (data.final) {
+          setStatus("final_rejected");
+          setResult(data);
+          return;
+        }
+
         const newCount = data.rejectCount ?? rejectCount + 1;
         setRejectCount(newCount);
         setStatus("searching_new_offer");
@@ -219,6 +228,7 @@ export function TradePanel({
       !offerError &&
       !isExpired &&
       status !== "executed" &&
+        status !== "final_rejected" &&
       status !== "searching_new_offer" &&
       status !== "accepting"
   );
@@ -287,8 +297,7 @@ export function TradePanel({
               🔄 Searching for better offer...
             </p>
             <p className="text-gray-400 text-sm mb-3">
-              MarketAgent is fetching the latest HBAR price and generating a new
-              offer.{" "}
+              🔄 Finding better offer...{" "}
               {rejectCount > 0 && (
                 <span className="text-violet-400">
                   (Attempt {rejectCount}/3)
@@ -494,6 +503,18 @@ export function TradePanel({
             onClick={startNewTrade}
             className="btn-cyan w-full py-3 text-center"
           >
+            🚀 START NEW TRADE
+          </button>
+        </div>
+      )}
+
+      {status === "final_rejected" && (
+        <div className="mt-6 p-5 border-2 border-red-400/50 bg-red-400/10 rounded-lg text-center">
+          <p className="text-red-300 font-bold text-lg mb-2">❌ No better offers available</p>
+          <p className="text-sm text-red-200 mb-4">
+            You rejected 3 offers. Start a new trade to continue.
+          </p>
+          <button onClick={startNewTrade} className="btn-cyan w-full py-3">
             🚀 START NEW TRADE
           </button>
         </div>

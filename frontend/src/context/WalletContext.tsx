@@ -6,14 +6,15 @@ import {
   useState,
   useEffect,
   useCallback,
-  type ReactNode,
+  type ReactNode
 } from "react";
 
 interface WalletContextType {
   accountId: string | null;
   isConnected: boolean;
   isConnecting: boolean;
-  connect: () => void;
+  hashconnect: any;
+  connect: () => Promise<void>;
   disconnect: () => void;
 }
 
@@ -21,7 +22,8 @@ const WalletContext = createContext<WalletContextType>({
   accountId: null,
   isConnected: false,
   isConnecting: false,
-  connect: () => {},
+  hashconnect: null,
+  connect: async () => {},
   disconnect: () => {},
 });
 
@@ -29,28 +31,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [accountId, setAccountId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
-
-  const clearWalletState = useCallback(() => {
-    setAccountId(null);
-    setIsConnected(false);
-    setIsConnecting(false);
-    localStorage.removeItem("agentfi_wallet");
-    localStorage.removeItem("agentfi_hashconnect_pairing");
-  }, []);
-
-  const applyConnectedAccount = useCallback((id: string) => {
-    const normalized = id.trim();
-    if (!normalized.startsWith("0.0.")) {
-      return;
-    }
-    setAccountId(normalized);
-    setIsConnected(true);
-    localStorage.setItem("agentfi_wallet", normalized);
-  }, []);
+  const [hc, setHc] = useState<any>(null);
+  const [pairingData, setPairingData] = useState<any>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("agentfi_wallet");
-    if (saved && saved.startsWith('0.0.')) {
+    if (saved && saved.startsWith("0.0.")) {
       setAccountId(saved);
       setIsConnected(true);
     }
@@ -61,37 +47,88 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setIsConnecting(true);
 
     try {
-      if (typeof window !== "undefined") {
-        // Open HashPack first so users can approve/pair in wallet UI.
-        window.open("https://wallet.hashpack.app", "_blank", "noopener,noreferrer");
-      }
+      const { HashConnect } = await import("hashconnect");
+      const { LedgerId } = await import("@hashgraph/sdk");
 
-      const id = prompt(
-        "Approve/pair in HashPack, then enter your Hedera Account ID:\nExample: 0.0.8150748"
+      const projectId =
+        process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
+
+      const hashconnect = new HashConnect(
+        LedgerId.TESTNET,
+        projectId,
+        {
+          name: "AgentFi",
+          description: "AI Agent OTC Trading on Hedera",
+          icons: [],
+          url: window.location.origin,
+        },
+        false
       );
 
-      if (id && id.trim().startsWith("0.0.")) {
-        applyConnectedAccount(id);
-      }
-    } catch (err) {
-      console.error("Wallet connect error:", err);
-    } finally {
+      await hashconnect.init();
+      setHc(hashconnect);
+
+      hashconnect.pairingEvent.once((data: any) => {
+        const id = data?.accountIds?.[0];
+        if (id) {
+          setAccountId(id);
+          setIsConnected(true);
+          setPairingData(data);
+          localStorage.setItem("agentfi_wallet", id);
+          localStorage.setItem(
+            "agentfi_pairing",
+            JSON.stringify(data)
+          );
+        }
+        setIsConnecting(false);
+      });
+
+      await hashconnect.openPairingModal();
+
+      setTimeout(() => {
+        setIsConnecting(false);
+      }, 120000);
+    } catch (err: any) {
+      console.error("Wallet error:", err);
       setIsConnecting(false);
+
+      const id = prompt(
+        "HashPack not detected.\n" +
+          "Enter your Hedera Account ID:\n" +
+          "e.g. 0.0.8150748"
+      );
+      if (id && id.startsWith("0.0.")) {
+        setAccountId(id.trim());
+        setIsConnected(true);
+        localStorage.setItem("agentfi_wallet", id.trim());
+      }
     }
-  }, [applyConnectedAccount, isConnected, isConnecting]);
+  }, [isConnecting, isConnected]);
 
   const disconnect = useCallback(() => {
-    clearWalletState();
-  }, [clearWalletState]);
+    try {
+      hc?.disconnect();
+    } catch {}
+    setAccountId(null);
+    setIsConnected(false);
+    setIsConnecting(false);
+    setHc(null);
+    setPairingData(null);
+    localStorage.removeItem("agentfi_wallet");
+    localStorage.removeItem("agentfi_pairing");
+  }, [hc]);
 
   return (
-    <WalletContext.Provider value={{
-      accountId,
-      isConnected,
-      isConnecting,
-      connect,
-      disconnect
-    }}>
+    <WalletContext.Provider
+      value={{
+        accountId,
+        isConnected,
+        isConnecting,
+        hashconnect: hc,
+        connect,
+        disconnect,
+      }}
+    >
       {children}
     </WalletContext.Provider>
   );
