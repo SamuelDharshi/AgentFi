@@ -111,11 +111,11 @@ export default function DashboardPage() {
 
         setAgentStatus(statusData);
         setMetrics({
-          websocket: healthData.status.toUpperCase() === "OK" ? "CONNECTED" : healthData.status.toUpperCase(),
+          websocket: (healthData.status || "").toUpperCase() === "OK" ? "CONNECTED" : (healthData.status || "").toUpperCase() || "SYNCING",
           topic: healthData.topic || statusData.topicId || "0.0.8270343",
           negotiations: `${statusData.negotiationCount} LIVE`,
           lastActivity: formatRelativeTime(statusData.lastMessageAt, Date.now()),
-          network: healthData.network.toUpperCase(),
+          network: (healthData.network || "").toUpperCase() || "UNKNOWN",
         });
       } catch {
         if (!active) {

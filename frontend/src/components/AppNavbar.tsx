@@ -80,7 +80,7 @@ export function AppNavbar() {
   }, [pathname]);
 
   const networkLabel = health
-    ? `${health.network.toUpperCase()} · ${health.status.toUpperCase()}`
+    ? `${(health.network || "").toUpperCase()} · ${(health.status || "").toUpperCase()}`
     : "SYNCING";
 
   return (

@@ -1,19 +1,13 @@
-'use client'
-import {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  ReactNode
-} from 'react'
+"use client";
+
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 
 interface WalletContextType {
-  accountId: string | null
-  isConnected: boolean
-  isConnecting: boolean
-  connect: () => void
-  disconnect: () => void
+  accountId: string | null;
+  isConnected: boolean;
+  isConnecting: boolean;
+  connect: () => void;
+  disconnect: () => void;
 }
 
 const WalletContext = createContext<WalletContextType>({
@@ -21,50 +15,50 @@ const WalletContext = createContext<WalletContextType>({
   isConnected: false,
   isConnecting: false,
   connect: () => {},
-  disconnect: () => {}
-})
+  disconnect: () => {},
+});
 
 export function WalletProvider({ children }: { children: ReactNode }) {
-  const [accountId, setAccountId] = useState<string | null>(null)
-  const [isConnected, setIsConnected] = useState(false)
-  const [isConnecting, setIsConnecting] = useState(false)
+  const [accountId, setAccountId] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem('agentfi_wallet')
+    const saved = localStorage.getItem("agentfi_wallet");
     if (saved && saved.startsWith('0.0.')) {
-      setAccountId(saved)
-      setIsConnected(true)
+      setAccountId(saved);
+      setIsConnected(true);
     }
-  }, [])
+  }, []);
 
-  const connect = useCallback(() => {
-    if (isConnecting || isConnected) return
+  const connect = useCallback(async () => {
+    if (isConnecting || isConnected) return;
+    setIsConnecting(true);
 
-    const id = prompt(
-      '🔗 Enter your Hedera Account ID:\n\n' +
-      'Example: 0.0.8150748\n\n' +
-      'Find it at portal.hedera.com'
-    )
+    try {
+      const id = prompt(
+        "Enter your Hedera Account ID to connect:\nExample: 0.0.8150748"
+      );
 
-    if (!id) return
-
-    const trimmed = id.trim()
-    if (!trimmed.startsWith('0.0.')) {
-      alert('Invalid account ID. Must start with 0.0.')
-      return
+      if (id && id.trim().startsWith("0.0.")) {
+        const normalized = id.trim();
+        setAccountId(normalized);
+        setIsConnected(true);
+        localStorage.setItem("agentfi_wallet", normalized);
+      }
+    } catch (err) {
+      console.error("Wallet connect error:", err);
+    } finally {
+      setIsConnecting(false);
     }
-
-    setAccountId(trimmed)
-    setIsConnected(true)
-    localStorage.setItem('agentfi_wallet', trimmed)
-  }, [isConnecting, isConnected])
+  }, [isConnecting, isConnected]);
 
   const disconnect = useCallback(() => {
-    setAccountId(null)
-    setIsConnected(false)
-    setIsConnecting(false)
-    localStorage.removeItem('agentfi_wallet')
-  }, [])
+    setAccountId(null);
+    setIsConnected(false);
+    setIsConnecting(false);
+    localStorage.removeItem("agentfi_wallet");
+  }, []);
 
   return (
     <WalletContext.Provider value={{
@@ -76,7 +70,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }}>
       {children}
     </WalletContext.Provider>
-  )
+  );
 }
 
-export const useWallet = () => useContext(WalletContext)
+export const useWallet = () => useContext(WalletContext);

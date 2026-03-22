@@ -59,19 +59,18 @@ function stripTrailingSlash(value: string): string {
 }
 
 export function backendHttpUrl(): string {
-  return stripTrailingSlash(
-    process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001"
-  );
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+  if (!apiUrl) {
+    throw new Error("NEXT_PUBLIC_API_URL is not configured");
+  }
+
+  return stripTrailingSlash(apiUrl);
 }
 
 export function backendWsUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_BACKEND_WS_URL;
-  if (configured) {
-    return stripTrailingSlash(configured);
-  }
-
   const http = backendHttpUrl();
-  return http.replace(/^http/i, "ws");
+  return http.replace("https://", "wss://").replace("http://", "ws://");
 }
 
 const observerApi = axios.create({

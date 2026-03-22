@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AppNavbar } from "@/components/AppNavbar";
+import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { ShellFooter } from "@/components/ShellFooter";
 import { WalletProvider } from "@/context/WalletContext";
 import "./globals.css";
@@ -19,11 +20,13 @@ export default function RootLayout({
       <body className="antialiased pt-16 animated-bg">
         <div className="top-progress-line" />
         <WalletProvider>
-          <AppNavbar />
-          <div className="relative min-h-screen">
-            {children}
-            <ShellFooter />
-          </div>
+          <AppErrorBoundary>
+            <AppNavbar />
+            <div className="relative min-h-screen">
+              {children}
+              <ShellFooter />
+            </div>
+          </AppErrorBoundary>
         </WalletProvider>
       </body>
     </html>
