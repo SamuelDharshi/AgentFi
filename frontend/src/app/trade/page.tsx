@@ -8,7 +8,7 @@ import { TradeNegotiationLog } from "@/components/TradeNegotiationLog";
 import { TradePanel } from "@/components/TradePanel";
 import { useWallet } from "@/context/WalletContext";
 import {
-  DebugOfferRecord,
+  LiveOfferRecord,
   TradeMessage,
   TradePayload,
   getLiveOffers,
@@ -35,7 +35,7 @@ export default function TradePage() {
     CONFIGURED_MARKET_AGENT ? [CONFIGURED_MARKET_AGENT] : []
   );
 
-  function mapOfferRecord(record: DebugOfferRecord): TradePayload {
+  function mapOfferRecord(record: LiveOfferRecord): TradePayload {
     return {
       wallet: record.wallet,
       token: record.token,

@@ -37,6 +37,11 @@ export interface TradeExecutionResponse {
   settlement?: string;
   message?: string;
   negotiation?: TradeMessage[];
+  // Rejection flow fields
+  rejected?: boolean;
+  final?: boolean;
+  retryAfter?: number;
+  rejectCount?: number;
 }
 
 export interface TradeOfferResponse {
@@ -65,7 +70,7 @@ export interface HealthResponse {
   topic: string;
 }
 
-export interface DebugOfferRecord {
+export interface LiveOfferRecord {
   wallet: string;
   token: string;
   amount: number;
@@ -76,20 +81,20 @@ export interface DebugOfferRecord {
   notes: string | null;
 }
 
-export interface DebugOffersResponse {
-  count: number;
-  keys: string[];
-  offers: DebugOfferRecord[];
-}
-
 export interface LiveOffersResponse {
   count: number;
-  newest: DebugOfferRecord | null;
-  offers: DebugOfferRecord[];
+  newest: LiveOfferRecord | null;
+  offers: LiveOfferRecord[];
+}
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
+if (!API_URL) {
+  throw new Error("NEXT_PUBLIC_API_URL is not configured");
 }
 
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001",
+  baseURL: API_URL,
 });
 
 export async function sendChat(
@@ -133,11 +138,6 @@ export async function getAgentStatus(): Promise<AgentStatusResponse> {
 
 export async function getHealth(): Promise<HealthResponse> {
   const response = await api.get<HealthResponse>("/health");
-  return response.data;
-}
-
-export async function getDebugOffers(): Promise<DebugOffersResponse> {
-  const response = await api.get<DebugOffersResponse>("/debug/offers");
   return response.data;
 }
 
