@@ -151,12 +151,10 @@ export default function ChatPage() {
         <header className="border-b border-violet-500/20 bg-slate-950/40 backdrop-blur px-6 py-4 shrink-0">
           <h1 className="font-orbitron text-2xl text-violet-300 flex items-center gap-2">
             <span className="online-indicator" />
-            🤖 UserAgent Terminal
+            💬 Trade Chat
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            {isConnected && accountId
-              ? `Connected: ${accountId}`
-              : "Wallet not connected"}
+            Live agent conversation and offer generation
           </p>
         </header>
 
@@ -207,8 +205,20 @@ export default function ChatPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Section */}
+        {/* UserAgent Terminal (Input Section) */}
         <div className="border-t border-violet-500/20 bg-gradient-to-t from-slate-950 to-slate-900/50 p-4 shrink-0">
+          <div className="mb-3">
+            <p className="font-orbitron text-violet-300 text-sm flex items-center gap-2">
+              <span className="online-indicator" />
+              🤖 UserAgent Terminal
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              {isConnected && accountId
+                ? `Connected: ${accountId}`
+                : "Wallet not connected"}
+            </p>
+          </div>
+
           {error && (
             <div className="mb-3 text-red-400 text-xs font-mono bg-red-950/30 border border-red-500/30 rounded p-2">
               ⚠️ {error}

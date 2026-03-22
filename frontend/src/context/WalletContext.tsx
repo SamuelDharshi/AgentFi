@@ -35,11 +35,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [pairingData, setPairingData] = useState<any>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem("agentfi_wallet");
-    if (saved && saved.startsWith("0.0.")) {
-      setAccountId(saved);
-      setIsConnected(true);
-    }
+    // Never mark connected from local storage alone.
+    setAccountId(null);
+    setIsConnected(false);
   }, []);
 
   const connect = useCallback(async () => {
@@ -68,9 +66,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       await hashconnect.init();
       setHc(hashconnect);
 
+      let paired = false;
       hashconnect.pairingEvent.once((data: any) => {
         const id = data?.accountIds?.[0];
         if (id) {
+          paired = true;
           setAccountId(id);
           setIsConnected(true);
           setPairingData(data);
@@ -86,22 +86,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       await hashconnect.openPairingModal();
 
       setTimeout(() => {
+        if (!paired) {
+          setAccountId(null);
+          setIsConnected(false);
+        }
         setIsConnecting(false);
       }, 120000);
     } catch (err: any) {
       console.error("Wallet error:", err);
+      setAccountId(null);
+      setIsConnected(false);
       setIsConnecting(false);
-
-      const id = prompt(
-        "HashPack not detected.\n" +
-          "Enter your Hedera Account ID:\n" +
-          "e.g. 0.0.8150748"
+      window.alert(
+        "HashPack connection failed. Open HashPack extension, unlock wallet, then click CONNECT WALLET again."
       );
-      if (id && id.startsWith("0.0.")) {
-        setAccountId(id.trim());
-        setIsConnected(true);
-        localStorage.setItem("agentfi_wallet", id.trim());
-      }
     }
   }, [isConnecting, isConnected]);
 
