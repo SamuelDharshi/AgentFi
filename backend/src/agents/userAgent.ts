@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import Groq from "groq-sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import { AgentAnalysis, TradePayload } from "../types/messages";
 import { getHbarPrice } from "../utils/priceCache";
 
@@ -47,53 +47,52 @@ const defaultCoinGeckoIds: Record<string, string> = {
   ETH: "ethereum",
 };
 
-function getGroqClient(): Groq {
-  const apiKey = process.env.GROQ_API_KEY?.trim();
-  if (!apiKey) {
+function getAnthropic(): Anthropic {
+  const key = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!key) {
     throw new Error(
-      "GROQ_API_KEY missing - get free key at groq.com and add to backend/.env"
+      "ANTHROPIC_API_KEY missing - add ANTHROPIC_API_KEY to backend/.env"
     );
   }
-  return new Groq({ apiKey });
+  return new Anthropic({ apiKey: key });
 }
 
-// Groq retry wrapper with exponential backoff
-async function callGroqWithRetry(
-  messages: any[],
+// Anthropic call with retry and exponential backoff
+async function callAnthropicWithRetry(
+  systemPrompt: string,
+  userMessage: string,
   retries = 3
 ): Promise<string> {
-  const groq = getGroqClient();
+  const client = getAnthropic();
 
   for (let i = 0; i < retries; i++) {
     try {
-      const response = await groq.chat.completions.create({
-        model: "llama-3.1-8b-instant",
-        messages,
-        temperature: 0.1,
-        max_tokens: 500
+      const message = await client.messages.create({
+        model: "claude-sonnet-4-5",
+        max_tokens: 1024,
+        messages: [
+          {
+            role: "user",
+            content: systemPrompt + "\n\n" + userMessage
+          }
+        ]
       });
-      return response.choices[0]?.message?.content || "";
+      const text = message.content[0].type === "text"
+        ? message.content[0].text
+        : "";
+      return text;
     } catch (err: any) {
-      // Check for rate limit (429)
-      if (err?.status === 429 && i < retries - 1) {
-        const waitMs = (i + 1) * 2000; // 2s, 4s, 6s
+      if ((err?.status === 429 || err?.status >= 500) && i < retries - 1) {
+        const waitMs = (i + 1) * 2000;
         // eslint-disable-next-line no-console
-        console.warn(`[Groq] Rate limited - waiting ${waitMs}ms then retry ${i + 1}/${retries}`);
-        await new Promise(r => setTimeout(r, waitMs));
-        continue;
-      }
-      // Check for other retryable errors
-      if ((err?.status >= 500 || err?.code === "ECONNRESET") && i < retries - 1) {
-        const waitMs = (i + 1) * 1000;
-        // eslint-disable-next-line no-console
-        console.warn(`[Groq] Server error ${err?.status} - retrying in ${waitMs}ms`);
+        console.warn(`[Anthropic] Error ${err?.status} - retrying in ${waitMs}ms (${i + 1}/${retries})`);
         await new Promise(r => setTimeout(r, waitMs));
         continue;
       }
       throw err;
     }
   }
-  throw new Error("Groq failed after retries");
+  throw new Error("Anthropic failed after retries");
 }
 
 function stripMarkdownCodeFence(value: string): string {
@@ -105,16 +104,13 @@ function stripMarkdownCodeFence(value: string): string {
   return trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
 }
 
-async function requestGroqJson<T>(
+async function requestAnthropicJson<T>(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<T> {
-  const messages: any[] = [
-    { role: "system", content: systemPrompt + "\n\nCRITICAL: Return ONLY the raw JSON object. No markdown code blocks, no backticks, no extra text before or after. Just the JSON." },
-    { role: "user", content: userPrompt },
-  ];
+  const fullSystem = systemPrompt + "\n\nCRITICAL: Return ONLY the raw JSON object. No markdown code blocks, no backticks, no extra text before or after. Just the JSON.";
 
-  let modelText = await callGroqWithRetry(messages, 3);
+  let modelText = await callAnthropicWithRetry(fullSystem, userPrompt, 3);
 
   // Aggressive cleanup: extract just the JSON object
   modelText = modelText.trim();
@@ -128,14 +124,14 @@ async function requestGroqJson<T>(
   }
 
   if (!modelText) {
-    throw new Error("Groq returned an empty response");
+    throw new Error("Anthropic returned an empty response");
   }
 
   try {
     return JSON.parse(modelText) as T;
   } catch (e) {
     throw new Error(
-      `Groq returned invalid JSON: ${modelText.slice(0, 240)}`,
+      `Anthropic returned invalid JSON: ${modelText.slice(0, 240)}`,
     );
   }
 }
@@ -274,10 +270,10 @@ function estimateLiquidityRatio(
   return roundTo((notionalUsd / Math.max(dailyVolumeUsd, 1)) * 100, 6);
 }
 
-async function parseTradeIntentWithGroq(
+async function parseTradeIntentWithAnthropic(
   input: string,
 ): Promise<ParsedTradeIntent> {
-  const parsed = await requestGroqJson<ParsedTradeIntent>(
+  const parsed = await requestAnthropicJson<ParsedTradeIntent>(
     "You extract OTC trade intents from natural language. Return strict JSON: { side: 'BUY'|'SELL', amount: number, sellToken: string, buyToken: string, reasoning: string }. Rules: (1) amount must be a positive finite number - convert shorthand like 1k to 1000, 2.5k to 2500, 1m to 1000000; (2) sellToken is the token the user gives away, buyToken is what they receive; (3) for 'Sell X A for B', sellToken=A buyToken=B; (4) for 'Buy X A with B', sellToken=B buyToken=A; (5) accept any token symbol including HBAR, USDC, USDT, BTC, ETH. Never use placeholder amounts - always extract the exact numeric value the user stated.",
     input,
   );
@@ -312,7 +308,7 @@ async function parseTradeIntentWithGroq(
   };
 }
 
-async function analyzeRiskWithGroq(
+async function analyzeRiskWithAnthropic(
   input: string,
   intent: ParsedTradeIntent,
   recommendedPrice: number,
@@ -320,7 +316,7 @@ async function analyzeRiskWithGroq(
   liquidityRatioPct: number,
   snapshot: MarketSnapshot,
 ): Promise<RiskDecision> {
-  const parsed = await requestGroqJson<RiskDecision>(
+  const parsed = await requestAnthropicJson<RiskDecision>(
     "You are a live OTC risk analyst. Return strict JSON: { riskScore: number, strategy: 'OTC'|'DEX', reasoning: string }. Keep riskScore in [0,1], reasoning <= 240 chars, and prefer OTC when size vs liquidity is high.",
     `Input=${input}\n` +
       `Intent=${intent.side} ${intent.amount} ${intent.sellToken} for ${intent.buyToken}\n` +
@@ -352,7 +348,7 @@ async function analyzeRiskWithGroq(
 async function analyzeAndParseTrade(
   input: string,
 ): Promise<{ intent: ParsedTradeIntent; analysis: AgentAnalysis }> {
-  const intent = await parseTradeIntentWithGroq(input);
+  const intent = await parseTradeIntentWithAnthropic(input);
   const snapshot = await fetchMarketSnapshot(intent.sellToken, intent.buyToken);
 
   const notionalUsd = intent.amount * snapshot.sellUsd;
@@ -366,7 +362,7 @@ async function analyzeAndParseTrade(
     snapshot.hbarDailyVolumeUsd,
   );
 
-  const risk = await analyzeRiskWithGroq(
+  const risk = await analyzeRiskWithAnthropic(
     input,
     intent,
     recommendedPrice,

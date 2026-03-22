@@ -61,6 +61,7 @@ let topicId = "";
 let lastMessageAt: number | null = null;
 const negotiationLog: TradeMessage[] = [];
 const offers = new Map<string, TradePayload>();
+const rejections = new Map<string, number>();
 const wsClients = new Set<WebSocket>();
 const activeMarketAgents = new Set<string>();
 let flowState: ObserverFlowState = "Discovering";
@@ -279,11 +280,55 @@ app.post("/trade", async (req, res) => {
     }
 
     if (!accepted) {
-      offers.delete(requestId);
+      const rejectCount = rejections.get(requestId) ?? 0;
+
+      if (rejectCount >= 3) {
+        // Too many rejections - end the negotiation
+        offers.delete(requestId);
+        rejections.delete(requestId);
+        return res.json({
+          executed: false,
+          rejected: true,
+          final: true,
+          message: "No better offers available",
+        });
+      }
+
+      // Increment rejection count
+      rejections.set(requestId, rejectCount + 1);
+
+      // Schedule a new offer from MarketAgent after 3 seconds
+      setTimeout(() => {
+        // eslint-disable-next-line no-console
+        console.log(`[Reject] Fetching new offer for ${requestId} (rejection ${rejectCount + 1}/3)`);
+        void (async () => {
+          try {
+            const { evaluateOffer } = await import("./agents/marketAgent");
+            const newOffer = await evaluateOffer(offer);
+            const updatedOffer: TradePayload = {
+              ...newOffer,
+              requestId: offer.requestId, // Keep same requestId so frontend can poll
+              timestamp: Date.now(),
+              notes: `Better offer (attempt ${rejectCount + 1}) | market price refreshed`,
+            };
+            offers.set(requestId, updatedOffer);
+            appendNegotiationMessage({ type: "TRADE_OFFER", payload: updatedOffer }, "local");
+            // eslint-disable-next-line no-console
+            console.log(`[Reject] New offer stored for ${requestId}: ${JSON.stringify({ price: updatedOffer.price, amount: updatedOffer.amount })}`);
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error(`[Reject] Failed to get new offer: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        })();
+      }, 3000);
+
       return res.json({
         executed: false,
-        message: "Trade declined by user",
-        negotiation: getNegotiationForRequest(requestId),
+        rejected: true,
+        final: false,
+        message: "Searching for better offer...",
+        retryAfter: 3,
+        rejectCount: rejectCount + 1,
       });
     }
 
