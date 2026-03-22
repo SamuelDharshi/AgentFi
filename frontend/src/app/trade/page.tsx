@@ -95,8 +95,8 @@ export default function TradePage() {
           return;
         }
 
-        const offerData: TradePayload = {
-          wallet: CONFIGURED_MARKET_AGENT,
+        const fallbackOffer: TradePayload = {
+          wallet: accountId ?? CONFIGURED_MARKET_AGENT,
           token: "USDC",
           amount: data.usdcAmount,
           price: data.offeredPrice,
@@ -105,6 +105,7 @@ export default function TradePage() {
           requestId: data.requestId,
           notes: `Offer for ${data.usdcAmount} USDC → ${data.hbarAmount} HBAR`,
         };
+        const offerData: TradePayload = data.offer ?? fallbackOffer;
 
         const msgs = data.negotiation ?? [];
         setMessages(msgs);
@@ -150,7 +151,7 @@ export default function TradePage() {
         window.clearTimeout(retryTimer);
       }
     };
-  }, [requestId, tradeClosed]);
+  }, [accountId, requestId, tradeClosed]);
 
   useEffect(() => {
     if (!offerPair || tradeClosed) {
@@ -282,9 +283,8 @@ export default function TradePage() {
                 return;
               }
 
+              // Keep request active on rejections so MarketAgent can keep proposing offers.
               setTradeClosed(false);
-              setOffer(null);
-              setRequestId(null);
             }}
           />
           <NegotiationFeed messages={messages} />

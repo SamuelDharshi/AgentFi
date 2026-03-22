@@ -1,6 +1,13 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  type ReactNode,
+} from "react";
 
 interface WalletContextType {
   accountId: string | null;
@@ -23,6 +30,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
 
+  const clearWalletState = useCallback(() => {
+    setAccountId(null);
+    setIsConnected(false);
+    setIsConnecting(false);
+    localStorage.removeItem("agentfi_wallet");
+    localStorage.removeItem("agentfi_hashconnect_pairing");
+  }, []);
+
+  const applyConnectedAccount = useCallback((id: string) => {
+    const normalized = id.trim();
+    if (!normalized.startsWith("0.0.")) {
+      return;
+    }
+    setAccountId(normalized);
+    setIsConnected(true);
+    localStorage.setItem("agentfi_wallet", normalized);
+  }, []);
+
   useEffect(() => {
     const saved = localStorage.getItem("agentfi_wallet");
     if (saved && saved.startsWith('0.0.')) {
@@ -36,29 +61,28 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setIsConnecting(true);
 
     try {
+      if (typeof window !== "undefined") {
+        // Open HashPack first so users can approve/pair in wallet UI.
+        window.open("https://wallet.hashpack.app", "_blank", "noopener,noreferrer");
+      }
+
       const id = prompt(
-        "Enter your Hedera Account ID to connect:\nExample: 0.0.8150748"
+        "Approve/pair in HashPack, then enter your Hedera Account ID:\nExample: 0.0.8150748"
       );
 
       if (id && id.trim().startsWith("0.0.")) {
-        const normalized = id.trim();
-        setAccountId(normalized);
-        setIsConnected(true);
-        localStorage.setItem("agentfi_wallet", normalized);
+        applyConnectedAccount(id);
       }
     } catch (err) {
       console.error("Wallet connect error:", err);
     } finally {
       setIsConnecting(false);
     }
-  }, [isConnecting, isConnected]);
+  }, [applyConnectedAccount, isConnected, isConnecting]);
 
   const disconnect = useCallback(() => {
-    setAccountId(null);
-    setIsConnected(false);
-    setIsConnecting(false);
-    localStorage.removeItem("agentfi_wallet");
-  }, []);
+    clearWalletState();
+  }, [clearWalletState]);
 
   return (
     <WalletContext.Provider value={{

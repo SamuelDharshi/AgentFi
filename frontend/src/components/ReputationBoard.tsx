@@ -38,6 +38,7 @@ export function ReputationBoard({ marketAgents }: ReputationBoardProps) {
   const [rows, setRows] = useState<ReputationRow[]>([]);
   const [missing, setMissing] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [rpcUnavailable, setRpcUnavailable] = useState(false);
 
   const registryAddress = (process.env.NEXT_PUBLIC_ERC8004_REGISTRY_ADDRESS ?? "").trim();
   const rpcUrl =
@@ -49,6 +50,13 @@ export function ReputationBoard({ marketAgents }: ReputationBoardProps) {
     let cancelled = false;
 
     const load = async () => {
+      if (rpcUnavailable) {
+        if (!cancelled) {
+          setLoading(false);
+        }
+        return;
+      }
+
       if (!registryAddress || !ethers.isAddress(registryAddress)) {
         if (!cancelled) {
           setRows([]);
@@ -90,6 +98,7 @@ export function ReputationBoard({ marketAgents }: ReputationBoardProps) {
       } catch (err) {
         if (!cancelled) {
           setMissing(false);
+          setRpcUnavailable(true);
         }
       } finally {
         if (!cancelled) {
@@ -99,6 +108,12 @@ export function ReputationBoard({ marketAgents }: ReputationBoardProps) {
     };
 
     void load();
+    if (rpcUnavailable) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const timer = setInterval(() => {
       void load();
     }, 10_000);
@@ -107,7 +122,7 @@ export function ReputationBoard({ marketAgents }: ReputationBoardProps) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [addresses, registryAddress, rpcUrl]);
+  }, [addresses, registryAddress, rpcUnavailable, rpcUrl]);
 
   return (
     <section className="panel-card p-5">
@@ -125,6 +140,15 @@ export function ReputationBoard({ marketAgents }: ReputationBoardProps) {
           </p>
           <p className="mt-1 text-xs text-red-200/70">
             Set NEXT_PUBLIC_ERC8004_REGISTRY_ADDRESS in .env.local
+          </p>
+        </div>
+      ) : null}
+
+      {rpcUnavailable ? (
+        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+          <p className="text-sm text-amber-300">⚠️ Reputation RPC currently unavailable</p>
+          <p className="mt-1 text-xs text-amber-200/80">
+            Check NEXT_PUBLIC_HEDERA_JSON_RPC_URL and make sure CSP allows the RPC host.
           </p>
         </div>
       ) : null}

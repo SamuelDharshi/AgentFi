@@ -282,25 +282,13 @@ app.post("/trade", async (req, res) => {
     if (!accepted) {
       const rejectCount = rejections.get(requestId) ?? 0;
 
-      if (rejectCount >= 3) {
-        // Too many rejections - end the negotiation
-        offers.delete(requestId);
-        rejections.delete(requestId);
-        return res.json({
-          executed: false,
-          rejected: true,
-          final: true,
-          message: "No better offers available",
-        });
-      }
-
       // Increment rejection count
       rejections.set(requestId, rejectCount + 1);
 
       // Schedule a new offer from MarketAgent after 3 seconds
       setTimeout(() => {
         // eslint-disable-next-line no-console
-        console.log(`[Reject] Fetching new offer for ${requestId} (rejection ${rejectCount + 1}/3)`);
+        console.log(`[Reject] Fetching new offer for ${requestId} (rejection ${rejectCount + 1})`);
         void (async () => {
           try {
             const { evaluateOffer } = await import("./agents/marketAgent");
@@ -424,6 +412,8 @@ app.get("/trade/offer", (req, res) => {
     hbarAmount,
     spread: 0.5,
     expiresAt,
+    offer,
+    negotiation: getNegotiationForRequest(requestId),
   });
 });
 

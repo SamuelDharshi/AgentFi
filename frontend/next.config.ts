@@ -1,7 +1,34 @@
 import type { NextConfig } from "next";
 
+function toOrigin(value: string | undefined): string {
+  if (!value) return "";
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "";
+  }
+}
+
 const nextConfig: NextConfig = {
   async headers() {
+    const apiOrigin = toOrigin(process.env.NEXT_PUBLIC_API_URL);
+    const rpcOrigin = toOrigin(process.env.NEXT_PUBLIC_HEDERA_JSON_RPC_URL);
+    const connectSrc = [
+      "'self'",
+      apiOrigin,
+      "wss:",
+      "ws:",
+      "https://api.coingecko.com",
+      "https://testnet.mirrornode.hedera.com",
+      "https://testnet.hashio.io",
+      "https://mainnet.hashio.io",
+      "https://s3.tradingview.com",
+      "https://www.tradingview.com",
+      rpcOrigin,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
     return [
       {
         source: "/(.*)",
@@ -12,7 +39,7 @@ const nextConfig: NextConfig = {
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://s3.tradingview.com https://s.tradingview.com https://www.tradingview.com",
               "frame-src 'self' https://s.tradingview.com https://www.tradingview.com",
-              `connect-src 'self' ${process.env.NEXT_PUBLIC_API_URL ?? ''} wss: ws: https://api.coingecko.com https://testnet.mirrornode.hedera.com https://s3.tradingview.com https://www.tradingview.com`,
+              `connect-src ${connectSrc}`,
               "img-src 'self' data: blob: https:",
               "style-src 'self' 'unsafe-inline' https://s3.tradingview.com",
               "font-src 'self' data: https://s3.tradingview.com",

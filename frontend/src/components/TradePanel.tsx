@@ -22,7 +22,6 @@ type PanelStatus =
   | "rejecting"
   | "searching_new_offer"
   | "offer_found"
-  | "final_rejected"
   | "executed";
 
 const OFFER_TTL_SECONDS = 300; // 5 minutes
@@ -100,16 +99,7 @@ export function TradePanel({
   const startPollingForNewOffer = useCallback(() => {
     if (!requestId) return;
 
-    let attempts = 0;
-    const maxAttempts = 15; // 15 × 2s = 30s max
-
     const poll = async () => {
-      attempts++;
-      if (attempts > maxAttempts) {
-        setStatus("final_rejected");
-        return;
-      }
-
       try {
         const data = await getTradeOffer(requestId);
         if (data && data.offeredPrice) {
@@ -147,6 +137,24 @@ export function TradePanel({
     if (accepted && !isWalletConnected) {
       setError("Please connect your wallet to accept trades");
       return;
+    }
+
+    if (accepted) {
+      const expectedOut = Math.round(displayOffer.amount / displayOffer.price);
+      const confirmed = window.confirm(
+        [
+          "Confirm trade on Hedera testnet:",
+          `Send: ${displayOffer.amount} ${displayOffer.token}`,
+          `Receive: ~${expectedOut} ${displayOffer.buyToken ?? "HBAR"}`,
+          "",
+          "Click OK to continue.",
+        ].join("\n")
+      );
+
+      if (!confirmed) {
+        setStatus("idle");
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -190,19 +198,12 @@ export function TradePanel({
 
       // Handle rejection response
       if (!accepted) {
-        if (data.final) {
-          // No more offers
-          setStatus("final_rejected");
-          setResult(data);
-        } else {
-          // Searching for a better offer
-          const newCount = data.rejectCount ?? rejectCount + 1;
-          setRejectCount(newCount);
-          setStatus("searching_new_offer");
-          setResult(null);
-          // Poll for new offer
-          startPollingForNewOffer();
-        }
+        // Keep searching for better offers until the user accepts one.
+        const newCount = data.rejectCount ?? rejectCount + 1;
+        setRejectCount(newCount);
+        setStatus("searching_new_offer");
+        setResult(null);
+        startPollingForNewOffer();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Trade execution failed");
@@ -218,7 +219,6 @@ export function TradePanel({
       !offerError &&
       !isExpired &&
       status !== "executed" &&
-      status !== "final_rejected" &&
       status !== "searching_new_offer" &&
       status !== "accepting"
   );
@@ -304,7 +304,6 @@ export function TradePanel({
         {/* ── LIVE OFFER CARD ── */}
         {displayOffer &&
           status !== "executed" &&
-          status !== "final_rejected" &&
           status !== "searching_new_offer" && (
             <div className="card-dark bg-black/40 border-violet-400 p-4">
               {status === "offer_found" && (
@@ -500,22 +499,6 @@ export function TradePanel({
         </div>
       )}
 
-      {/* ── FINAL REJECTED (no more offers) ── */}
-      {status === "final_rejected" && (
-        <div className="mt-6 p-5 border-2 border-red-400/50 bg-red-400/10 rounded-lg text-center">
-          <p className="text-red-400 font-bold text-lg mb-2">
-            ❌ No better offers available
-          </p>
-          <p className="text-gray-300 mb-2">
-            MarketAgent could not find a better price after {rejectCount}{" "}
-            {rejectCount === 1 ? "attempt" : "attempts"}.
-          </p>
-          <p className="text-gray-400 text-sm mb-6">No funds were moved.</p>
-          <button onClick={startNewTrade} className="btn-cyan w-full py-3">
-            🚀 START NEW TRADE
-          </button>
-        </div>
-      )}
     </section>
   );
 }

@@ -80,6 +80,19 @@ export default function ChatPage() {
       return;
     }
 
+    const confirmed = window.confirm(
+      [
+        "Create testnet trade request?",
+        text,
+        "",
+        "This will ask MarketAgent for live offers.",
+      ].join("\n")
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
     setAgentMessages([]);
