@@ -35,6 +35,73 @@ interface CoinGeckoMarketsRow {
   total_volume?: number;
 }
 
+function parseAmountToken(raw: string): { amount: number; token: string } {
+  const match = raw.trim().match(/^(\d+(?:\.\d+)?)([kKmM]?)\s+([A-Za-z0-9.]+)$/);
+  if (!match) {
+    throw new Error(`Could not parse amount/token segment: ${raw}`);
+  }
+
+  let amount = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  const token = match[3].toUpperCase();
+
+  if (unit === "k") {
+    amount *= 1_000;
+  }
+  if (unit === "m") {
+    amount *= 1_000_000;
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("amount must be a positive number");
+  }
+
+  return { amount, token };
+}
+
+function parseTradeIntentHeuristic(input: string): ParsedTradeIntent {
+  const normalized = input.replace(/,/g, "").trim();
+
+  const sellMatch = normalized.match(/sell\s+(.+?)\s+for\s+([A-Za-z0-9.]+)/i);
+  if (sellMatch) {
+    const { amount, token } = parseAmountToken(sellMatch[1]);
+    return {
+      side: "SELL",
+      amount,
+      sellToken: token,
+      buyToken: sellMatch[2].toUpperCase(),
+      reasoning: "heuristic-sell-pattern",
+    };
+  }
+
+  const buyMatch = normalized.match(/buy\s+(.+?)\s+with\s+([A-Za-z0-9.]+)/i);
+  if (buyMatch) {
+    const { amount, token } = parseAmountToken(buyMatch[1]);
+    return {
+      side: "BUY",
+      amount,
+      sellToken: buyMatch[2].toUpperCase(),
+      buyToken: token,
+      reasoning: "heuristic-buy-pattern",
+    };
+  }
+
+  throw new Error("Could not parse trade intent. Use: Sell 10 USDC for HBAR");
+}
+
+function analyzeRiskHeuristic(
+  liquidityRatioPct: number,
+  slippagePct: number,
+): RiskDecision {
+  const riskScore = Math.min(1, Math.max(0, (liquidityRatioPct / 0.02) * 0.7 + (slippagePct / 5) * 0.3));
+  const strategy = riskScore > 0.35 ? "OTC" : "DEX";
+  return {
+    riskScore: roundTo(riskScore, 4),
+    strategy,
+    reasoning: `heuristic risk model; liquidityRatioPct=${liquidityRatioPct.toFixed(6)}, slippagePct=${slippagePct.toFixed(4)}`,
+  };
+}
+
 const COINGECKO_SIMPLE_PRICE_URL =
   "https://api.coingecko.com/api/v3/simple/price";
 const COINGECKO_MARKETS_URL = "https://api.coingecko.com/api/v3/coins/markets";
@@ -348,7 +415,19 @@ async function analyzeRiskWithAnthropic(
 async function analyzeAndParseTrade(
   input: string,
 ): Promise<{ intent: ParsedTradeIntent; analysis: AgentAnalysis }> {
-  const intent = await parseTradeIntentWithAnthropic(input);
+  let intent: ParsedTradeIntent;
+  let usedFallback = false;
+
+  try {
+    intent = await parseTradeIntentWithAnthropic(input);
+  } catch (error) {
+    usedFallback = true;
+    intent = parseTradeIntentHeuristic(input);
+    const details = error instanceof Error ? error.message : String(error);
+    // eslint-disable-next-line no-console
+    console.warn(`[userAgent] Anthropic parse unavailable, using heuristic parser: ${details}`);
+  }
+
   const snapshot = await fetchMarketSnapshot(intent.sellToken, intent.buyToken);
 
   const notionalUsd = intent.amount * snapshot.sellUsd;
@@ -362,14 +441,26 @@ async function analyzeAndParseTrade(
     snapshot.hbarDailyVolumeUsd,
   );
 
-  const risk = await analyzeRiskWithAnthropic(
-    input,
-    intent,
-    recommendedPrice,
-    slippagePct,
-    liquidityRatioPct,
-    snapshot,
-  );
+  let risk: RiskDecision;
+  if (usedFallback) {
+    risk = analyzeRiskHeuristic(liquidityRatioPct, slippagePct);
+  } else {
+    try {
+      risk = await analyzeRiskWithAnthropic(
+        input,
+        intent,
+        recommendedPrice,
+        slippagePct,
+        liquidityRatioPct,
+        snapshot,
+      );
+    } catch (error) {
+      risk = analyzeRiskHeuristic(liquidityRatioPct, slippagePct);
+      const details = error instanceof Error ? error.message : String(error);
+      // eslint-disable-next-line no-console
+      console.warn(`[userAgent] Anthropic risk analysis unavailable, using heuristic model: ${details}`);
+    }
+  }
 
   const reasoning =
     `${risk.reasoning} | parse=${intent.reasoning || "n/a"}` +
