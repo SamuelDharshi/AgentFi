@@ -103,3 +103,4 @@ Desktop.ini
 *.pfx
 *.jks
 *.keystore
+.env*.local
