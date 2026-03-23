@@ -20,7 +20,7 @@ function formatTime(): string {
 
 export default function ChatPage() {
   const router = useRouter();
-  const { isConnected, accountId } = useWallet();
+  const { isConnected, accountId, connect, isConnecting } = useWallet();
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,9 +140,19 @@ export default function ChatPage() {
     <main className="min-h-screen bg-[#0a0f0a]">
       {/* Wallet Connection Warning */}
       {!isConnected && (
-        <div className="bg-red-900/20 border-b border-red-500/30 text-red-300 px-4 py-3 text-sm flex items-center gap-2">
+        <div className="bg-red-900/20 border-b border-red-500/30 text-red-300 px-4 py-3 text-sm flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
           <span>⚠️</span>
           <span>Connect your Hedera account to execute trades</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void connect()}
+            disabled={isConnecting}
+            className="rounded border border-violet-300/60 bg-violet-500/20 px-3 py-1 text-xs font-semibold text-violet-100 hover:bg-violet-500/35 disabled:opacity-60"
+          >
+            {isConnecting ? "CONNECTING..." : "CONNECT HASHPACK"}
+          </button>
         </div>
       )}
 
@@ -217,6 +227,16 @@ export default function ChatPage() {
                 ? `Connected: ${accountId}`
                 : "Wallet not connected"}
             </p>
+            {!isConnected && (
+              <button
+                type="button"
+                onClick={() => void connect()}
+                disabled={isConnecting}
+                className="mt-2 rounded border border-violet-300/60 bg-violet-500/20 px-3 py-1 text-xs font-semibold text-violet-100 hover:bg-violet-500/35 disabled:opacity-60"
+              >
+                {isConnecting ? "CONNECTING..." : "CONNECT HASHPACK"}
+              </button>
+            )}
           </div>
 
           {error && (

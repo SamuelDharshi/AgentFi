@@ -1,5 +1,6 @@
 "use client";
 
+import { isAxiosError } from "axios";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { TradeExecutionResponse, TradePayload, executeTrade, getTradeOffer } from "@/lib/api";
@@ -26,6 +27,8 @@ type PanelStatus =
   | "executed";
 
 const OFFER_TTL_SECONDS = 300; // 5 minutes
+const AUTO_TRADE_ENABLED =
+  (process.env.NEXT_PUBLIC_AUTO_TRADE_AGENT ?? "").trim().toLowerCase() === "true";
 
 export function TradePanel({
   requestId,
@@ -138,6 +141,11 @@ export function TradePanel({
     if (isSubmitting) return;
     if (!requestId || !displayOffer) return;
 
+    if (AUTO_TRADE_ENABLED) {
+      setError("Autonomous mode is enabled: the agent decides accept/reject automatically");
+      return;
+    }
+
     if (accepted && !isWalletConnected) {
       setError("Please connect your wallet to accept trades");
       return;
@@ -215,7 +223,15 @@ export function TradePanel({
         startPollingForNewOffer();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Trade execution failed");
+      if (isAxiosError(err)) {
+        const apiDetails =
+          (typeof err.response?.data?.details === "string" && err.response.data.details) ||
+          (typeof err.response?.data?.error === "string" && err.response.data.error) ||
+          null;
+        setError(apiDetails ?? err.message);
+      } else {
+        setError(err instanceof Error ? err.message : "Trade execution failed");
+      }
       setStatus("idle");
     } finally {
       setIsSubmitting(false);
@@ -247,6 +263,11 @@ export function TradePanel({
   return (
     <section className="card-dark">
       <h2 className="section-title">💰 Trade Execution</h2>
+      {AUTO_TRADE_ENABLED ? (
+        <p className="mt-2 text-sm text-emerald-300">
+          Autonomous mode active: agent evaluates offers and submits accept/reject automatically.
+        </p>
+      ) : null}
       <p className="mt-2 text-sm text-gray-300">
         Review the market offer and execute the atomic swap on Hedera EVM.
       </p>
@@ -387,7 +408,7 @@ export function TradePanel({
               className="btn-cyan flex-1 accept-btn"
               type="button"
               onClick={() => void submit(true)}
-              disabled={isSubmitting || !isWalletConnected}
+              disabled={AUTO_TRADE_ENABLED || isSubmitting || !isWalletConnected}
             >
               {isSubmitting && status === "accepting"
                 ? "⏳ EXECUTING..."
@@ -397,7 +418,7 @@ export function TradePanel({
               className="btn-red-outline flex-1 reject-btn"
               type="button"
               onClick={() => void submit(false)}
-              disabled={isSubmitting}
+              disabled={AUTO_TRADE_ENABLED || isSubmitting}
             >
               {isSubmitting && status === "rejecting" ? "..." : "❌ REJECT"}
             </button>

@@ -95,6 +95,15 @@ export default function TradePage() {
           return;
         }
 
+        if (
+          data.pending ||
+          (!data.offer && (!Number.isFinite(data.offeredPrice) || data.offeredPrice <= 0))
+        ) {
+          setOffer(null);
+          setOfferError(null);
+          return;
+        }
+
         const fallbackOffer: TradePayload = {
           wallet: accountId ?? CONFIGURED_MARKET_AGENT,
           token: "USDC",
@@ -154,7 +163,9 @@ export default function TradePage() {
   }, [accountId, requestId, tradeClosed]);
 
   useEffect(() => {
-    if (!offerPair || tradeClosed) {
+    // Only auto-discover newest offers when there is no active request yet.
+    // Once a requestId is selected, stay pinned to that request's offer stream.
+    if (!offerPair || tradeClosed || !!requestId) {
       return;
     }
 
@@ -180,7 +191,7 @@ export default function TradePage() {
         }
 
         const newest = data.newest ? mapOfferRecord(data.newest) : null;
-        if (newest && (!offer || newest.requestId !== offer.requestId)) {
+        if (newest) {
           setRequestId(newest.requestId);
           setOffer(newest);
           if (typeof window !== "undefined") {
@@ -216,7 +227,7 @@ export default function TradePage() {
         window.clearTimeout(retryTimer);
       }
     };
-  }, [offerPair, offer, requestId, tradeClosed]);
+  }, [offerPair, requestId, tradeClosed]);
 
   if (!requestId) {
     return (

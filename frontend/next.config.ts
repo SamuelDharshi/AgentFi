@@ -16,6 +16,10 @@ const nextConfig: NextConfig = {
     const connectSrc = [
       "'self'",
       apiOrigin,
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "http://localhost:3002",
+      "http://localhost:3003",
       "wss:",
       "ws:",
       "https://api.coingecko.com",
@@ -38,7 +42,7 @@ const nextConfig: NextConfig = {
             value: [
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://s3.tradingview.com https://s.tradingview.com https://www.tradingview.com",
-              "frame-src 'self' https://s.tradingview.com https://www.tradingview.com",
+              "frame-src 'self' https://s.tradingview.com https://www.tradingview.com https://verify.walletconnect.org",
               `connect-src ${connectSrc}`,
               "img-src 'self' data: blob: https:",
               "style-src 'self' 'unsafe-inline' https://s3.tradingview.com",

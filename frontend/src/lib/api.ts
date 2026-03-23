@@ -52,6 +52,7 @@ export interface TradeOfferResponse {
   hbarAmount: number;
   spread: number;
   expiresAt: number;
+  pending?: boolean;
   offer?: TradePayload;
   negotiation?: TradeMessage[];
 }
