@@ -86,28 +86,6 @@ AgentFi/
 └── README.md
 ```
 
-## 🎨 Design System
-
-AgentFi features a **terminal aesthetic** with modern web technologies:
-
-### Colors
-```
-Primary:   #a855f7 (Purple)
-Secondary: #3b82f6 (Blue)
-Background: #050505 (Deep Black)
-Text: #ffffff (White)
-```
-
-### Typography
-- **Body**: Space Grotesk (Google Fonts)
-- **Mono**: JetBrains Mono (Google Fonts)
-
-### Components
-- `.terminal-card` - Dark cards with gradient borders
-- `.glitch-text` - Animated glitch effect
-- `.btn-cyan` / `.btn-outline` - Button styles
-- `.status-indicator` - Pulsing status dots
-
 ## 🔧 Tech Stack
 
 ### Frontend (User Interface)
