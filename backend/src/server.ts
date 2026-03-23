@@ -3,7 +3,7 @@ import cors from "cors";
 import express from "express";
 import { createServer } from "http";
 import { WebSocket, WebSocketServer } from "ws";
-import { onTradeRequest } from "./agents/marketAgent";
+import { evaluateOffer, onTradeRequest } from "./agents/marketAgent";
 import {
   HcsBridgeObservation,
   receiveTradeRequest,
@@ -62,12 +62,59 @@ let lastMessageAt: number | null = null;
 const negotiationLog: TradeMessage[] = [];
 const offers = new Map<string, TradePayload>();
 const rejections = new Map<string, number>();
+const inFlightOfferRequests = new Set<string>();
+const processedOfferRequests = new Map<string, number>();
+const autoDecisionInFlight = new Set<string>();
+const autoDecisionResolved = new Set<string>();
 const wsClients = new Set<WebSocket>();
 const activeMarketAgents = new Set<string>();
 let flowState: ObserverFlowState = "Discovering";
+const OFFER_REQUEST_DEDUP_WINDOW_MS = 5 * 60 * 1000;
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) {
+    return fallback;
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    return fallback;
+  }
+  return Math.floor(n);
+}
+
+function autoTradeEnabled(): boolean {
+  const v =
+    (process.env.AUTO_TRADE_AGENT ?? process.env.AUTO_TRADE_ENABLED ?? "").trim().toLowerCase();
+  return v === "true" || v === "1" || v === "yes";
+}
+
+function autoTradeMaxDeviationBps(): number {
+  return parsePositiveInt(process.env.AUTO_TRADE_MAX_DEVIATION_BPS, 75);
+}
+
+function autoTradeMaxRejections(): number {
+  return parsePositiveInt(process.env.AUTO_TRADE_MAX_REJECTIONS, 2);
+}
 
 function configuredMarketAgentAddress(): string {
   return (process.env.MARKET_AGENT_EVM_ADDRESS ?? "").trim().toLowerCase();
+}
+
+function classifyTradeErrorStatus(error: unknown): number {
+  const details = error instanceof Error ? error.message : String(error ?? "");
+  const text = details.toLowerCase();
+
+  if (
+    text.includes("wallet") ||
+    text.includes("signer") ||
+    text.includes("configured") ||
+    text.includes("missing required environment variable") ||
+    text.includes("invalid")
+  ) {
+    return 400;
+  }
+
+  return 500;
 }
 
 function emitObserverEvent(event: ObserverEvent): void {
@@ -130,15 +177,25 @@ function isDuplicateNegotiationMessage(message: TradeMessage): boolean {
 
     const a = existing.payload;
     const b = message.payload;
+    if (a.requestId !== b.requestId) {
+      continue;
+    }
+
     if (
-      a.requestId === b.requestId &&
+      message.type === "TRADE_REQUEST" ||
+      message.type === "TRADE_ACCEPT" ||
+      message.type === "TRADE_EXECUTED"
+    ) {
+      return true;
+    }
+
+    if (
+      message.type === "TRADE_OFFER" &&
       a.wallet === b.wallet &&
       a.token === b.token &&
       a.amount === b.amount &&
       a.price === b.price &&
-      (a.buyToken ?? "") === (b.buyToken ?? "") &&
-      a.timestamp === b.timestamp &&
-      (a.notes ?? "") === (b.notes ?? "")
+      (a.buyToken ?? "") === (b.buyToken ?? "")
     ) {
       return true;
     }
@@ -184,13 +241,197 @@ function getNegotiationForRequest(requestId: string): TradeMessage[] {
   return negotiationLog.filter((entry) => entry.payload.requestId === requestId);
 }
 
+function shouldGenerateOffer(requestId: string): boolean {
+  const now = Date.now();
+
+  for (const [id, ts] of processedOfferRequests) {
+    if (now - ts > OFFER_REQUEST_DEDUP_WINDOW_MS) {
+      processedOfferRequests.delete(id);
+    }
+  }
+
+  if (offers.has(requestId)) {
+    return false;
+  }
+
+  if (inFlightOfferRequests.has(requestId)) {
+    return false;
+  }
+
+  const processedAt = processedOfferRequests.get(requestId);
+  if (processedAt && now - processedAt < OFFER_REQUEST_DEDUP_WINDOW_MS) {
+    return false;
+  }
+
+  return true;
+}
+
+async function finalizeAcceptedTrade(
+  offer: TradePayload,
+  actor: "user" | "agent"
+): Promise<{
+  executed: boolean;
+  success: boolean;
+  transactionId: string;
+  txHash: string;
+  usdcSent: number;
+  hbarReceived: number;
+  settlement: string;
+}> {
+  const acceptedPayload: TradePayload = {
+    ...offer,
+    timestamp: Date.now(),
+    notes:
+      actor === "agent"
+        ? "Agent accepted market offer"
+        : "User accepted market offer",
+  };
+
+  await sendTradeAccept(topicId, acceptedPayload);
+  appendNegotiationMessage(
+    {
+      type: "TRADE_ACCEPT",
+      payload: acceptedPayload,
+    },
+    actor === "agent" ? "local" : "api"
+  );
+
+  const execution = await executeTrade(offer);
+
+  const executedPayload: TradePayload = {
+    ...offer,
+    timestamp: Date.now(),
+    notes: execution.settlement,
+  };
+
+  await sendTradeExecuted(topicId, executedPayload);
+  appendNegotiationMessage(
+    {
+      type: "TRADE_EXECUTED",
+      payload: executedPayload,
+    },
+    actor === "agent" ? "local" : "api"
+  );
+
+  offers.delete(offer.requestId);
+  rejections.delete(offer.requestId);
+
+  return {
+    executed: execution.executed,
+    success: execution.executed,
+    transactionId: execution.transactionId,
+    txHash: execution.transactionId,
+    usdcSent: offer.token === "USDC" ? offer.amount : offer.amount * offer.price,
+    hbarReceived: offer.token === "USDC" ? offer.amount / offer.price : offer.amount,
+    settlement: execution.settlement,
+  };
+}
+
+async function maybeAutoResolveOffer(requestId: string): Promise<void> {
+  if (!autoTradeEnabled()) {
+    return;
+  }
+  if (autoDecisionResolved.has(requestId) || autoDecisionInFlight.has(requestId)) {
+    return;
+  }
+
+  const initial = offers.get(requestId);
+  if (!initial) {
+    return;
+  }
+
+  autoDecisionInFlight.add(requestId);
+
+  try {
+    const maxDeviationBps = autoTradeMaxDeviationBps();
+    const maxRejections = autoTradeMaxRejections();
+
+    for (let attempt = 0; attempt <= maxRejections; attempt += 1) {
+      const current = offers.get(requestId);
+      if (!current) {
+        autoDecisionResolved.add(requestId);
+        return;
+      }
+
+      const freshQuote = await evaluateOffer(current, requestId);
+      const refPrice = freshQuote.price;
+      const offeredPrice = current.price;
+      const deviationBps =
+        refPrice > 0
+          ? Math.round((Math.abs(offeredPrice - refPrice) / refPrice) * 10_000)
+          : Number.POSITIVE_INFINITY;
+
+      // eslint-disable-next-line no-console
+      console.log(
+        `[AutoTrade] requestId=${requestId} attempt=${attempt} offered=${offeredPrice} reference=${refPrice} deviationBps=${deviationBps}`
+      );
+
+      if (Number.isFinite(deviationBps) && deviationBps <= maxDeviationBps) {
+        await finalizeAcceptedTrade(current, "agent");
+        autoDecisionResolved.add(requestId);
+        // eslint-disable-next-line no-console
+        console.log(`[AutoTrade] accepted requestId=${requestId}`);
+        return;
+      }
+
+      if (attempt >= maxRejections) {
+        // After bounded rejections, accept the freshest available quote to prevent deadlock.
+        const fallback = offers.get(requestId) ?? current;
+        await finalizeAcceptedTrade(fallback, "agent");
+        autoDecisionResolved.add(requestId);
+        // eslint-disable-next-line no-console
+        console.log(
+          `[AutoTrade] accepted after max rejections requestId=${requestId} maxRejections=${maxRejections}`
+        );
+        return;
+      }
+
+      const rejectCount = rejections.get(requestId) ?? 0;
+      rejections.set(requestId, rejectCount + 1);
+      const refreshedOffer: TradePayload = {
+        ...freshQuote,
+        requestId,
+        timestamp: Date.now(),
+        isNewOffer: true,
+        notes: `Auto-agent rejected previous quote (attempt ${attempt + 1}); refreshed from market`,
+      };
+      offers.set(requestId, refreshedOffer);
+      appendNegotiationMessage({ type: "TRADE_OFFER", payload: refreshedOffer }, "local");
+    }
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    // eslint-disable-next-line no-console
+    console.error(`[AutoTrade] failed for requestId=${requestId}: ${details}`);
+  } finally {
+    autoDecisionInFlight.delete(requestId);
+  }
+}
+
 receiveTradeRequest(async (message) => {
   try {
     appendNegotiationMessage(message, "bridge");
 
+    if (message.type === "TRADE_OFFER") {
+      offers.set(message.payload.requestId, message.payload);
+      await maybeAutoResolveOffer(message.payload.requestId);
+      return;
+    }
+
+    if (message.type !== "TRADE_REQUEST") {
+      return;
+    }
+
+    const requestId = message.payload.requestId;
+    if (!shouldGenerateOffer(requestId)) {
+      return;
+    }
+
+    inFlightOfferRequests.add(requestId);
+
     const offer = await onTradeRequest(topicId, message);
     if (offer) {
       offers.set(offer.requestId, offer);
+      processedOfferRequests.set(requestId, Date.now());
       appendNegotiationMessage(
         {
           type: "TRADE_OFFER",
@@ -198,11 +439,16 @@ receiveTradeRequest(async (message) => {
         },
         "local"
       );
+      await maybeAutoResolveOffer(offer.requestId);
     }
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     // eslint-disable-next-line no-console
     console.error(`Failed to process trade request message: ${details}`);
+  } finally {
+    if (message.type === "TRADE_REQUEST") {
+      inFlightOfferRequests.delete(message.payload.requestId);
+    }
   }
 });
 
@@ -326,52 +572,12 @@ app.post("/trade", async (req, res) => {
       });
     }
 
-    const acceptedPayload: TradePayload = {
-      ...offer,
-      timestamp: Date.now(),
-      notes: "User accepted market offer",
-    };
-
-    await sendTradeAccept(topicId, acceptedPayload);
-    appendNegotiationMessage(
-      {
-        type: "TRADE_ACCEPT",
-        payload: acceptedPayload,
-      },
-      "api"
-    );
-
-    const execution = await executeTrade(offer);
-
-    const executedPayload: TradePayload = {
-      ...offer,
-      timestamp: Date.now(),
-      notes: execution.settlement,
-    };
-
-    await sendTradeExecuted(topicId, executedPayload);
-
-    appendNegotiationMessage(
-      {
-        type: "TRADE_EXECUTED",
-        payload: executedPayload,
-      },
-      "api"
-    );
-
-    offers.delete(requestId);
-
-    return res.json({
-      executed: execution.executed,
-      success: execution.executed,
-      transactionId: execution.transactionId,
-      txHash: execution.transactionId,
-      usdcSent: offer.token === "USDC" ? offer.amount : offer.amount * offer.price,
-      hbarReceived: offer.token === "USDC" ? offer.amount / offer.price : offer.amount,
-      settlement: execution.settlement,
-    });
+    const result = await finalizeAcceptedTrade(offer, "user");
+    autoDecisionResolved.add(requestId);
+    return res.json(result);
   } catch (error) {
-    return res.status(500).json({
+    const status = classifyTradeErrorStatus(error);
+    return res.status(status).json({
       error: "Failed to execute trade",
       details: error instanceof Error ? error.message : "Unknown error",
     });
@@ -386,9 +592,17 @@ app.get("/trade/offer", (req, res) => {
 
   const offer = offers.get(requestId);
   if (!offer) {
-    // eslint-disable-next-line no-console
-    console.log(`❌ Offer NOT found: ${requestId}`);
-    return res.status(404).json({ error: "Offer not found" });
+    return res.json({
+      requestId,
+      pending: true,
+      offeredPrice: 0,
+      usdcAmount: 0,
+      hbarAmount: 0,
+      spread: 0.5,
+      expiresAt: Date.now() + 60_000,
+      offer: null,
+      negotiation: getNegotiationForRequest(requestId),
+    });
   }
 
   // eslint-disable-next-line no-console
@@ -672,5 +886,24 @@ async function bootstrap(): Promise<void> {
 bootstrap().catch((error) => {
   // eslint-disable-next-line no-console
   console.error("Backend bootstrap failed", error);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const details = reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason);
+  // eslint-disable-next-line no-console
+  console.error(`[runtime] unhandledRejection: ${details}`);
+});
+
+process.on("uncaughtException", (error) => {
+  const message = (error?.message ?? "").toLowerCase();
+  if (message.includes("econnreset") || message.includes("connection dropped")) {
+    // eslint-disable-next-line no-console
+    console.warn(`[runtime] transient uncaughtException ignored: ${error.message}`);
+    return;
+  }
+
+  // eslint-disable-next-line no-console
+  console.error("[runtime] uncaughtException (fatal):", error);
   process.exit(1);
 });
