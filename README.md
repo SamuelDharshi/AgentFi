@@ -98,6 +98,10 @@ Next.js 16.1.6
   ├── HashConnect 3 (wallet integration)
   └── Framer Motion (animations)
 ```
+###Sequence diagram
+<img width="1169" height="809" alt="hede" src="https://github.com/user-attachments/assets/c79838f0-83b2-41e4-bdb7-963198dd9d6c" />
+ 
+
 
 ### Backend (Agent Orchestration)
 ```
