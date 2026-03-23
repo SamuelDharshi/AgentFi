@@ -106,7 +106,7 @@ async function fetchUsdPrices(ids: string[]): Promise<Record<string, number>> {
   return prices;
 }
 
-export async function evaluateOffer(request: TradePayload): Promise<TradePayload> {
+export async function evaluateOffer(request: TradePayload, requestId?: string): Promise<TradePayload> {
   const sellToken = request.token.trim();
   const buyToken = (request.buyToken ?? "HBAR").trim();
 
@@ -158,6 +158,7 @@ export async function evaluateOffer(request: TradePayload): Promise<TradePayload
       
       return {
         ...request,
+        requestId: requestId ?? request.requestId,
         price: offerPrice,
         timestamp: Date.now(),
         notes: `Settlement: immediate | market=${marketPrice.toFixed(8)} ${buyToken}/${sellToken} | spread=${(SPREAD_BPS / 100).toFixed(2)}% | (fallback price)`,
@@ -190,6 +191,7 @@ export async function evaluateOffer(request: TradePayload): Promise<TradePayload
     
     return {
       ...request,
+      requestId: requestId ?? request.requestId,
       price: offerPrice,
       timestamp: Date.now(),
       notes: `Settlement: immediate | market=${marketPrice.toFixed(8)} ${buyToken}/${sellToken} | spread=${(SPREAD_BPS / 100).toFixed(2)}%`,
@@ -210,6 +212,7 @@ export async function evaluateOffer(request: TradePayload): Promise<TradePayload
     
     return {
       ...request,
+      requestId: requestId ?? request.requestId,
       price: offerPrice,
       timestamp: Date.now(),
       notes: `Settlement: immediate | market=${marketPrice.toFixed(8)} ${buyToken}/${sellToken} | spread=${(SPREAD_BPS / 100).toFixed(2)}% | (error fallback)`,

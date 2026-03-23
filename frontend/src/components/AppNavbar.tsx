@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { getDebugOffers, getHealth, HealthResponse } from "@/lib/api";
+import { getHealth, HealthResponse } from "@/lib/api";
 import { useWallet } from "@/context/WalletContext";
 
 const NAV_ITEMS = [
   { href: "/home", label: "HOME" },
-  { href: "/", label: "DASHBOARD" },
+  { href: "/dashboard", label: "DASHBOARD" },
   { href: "/chat", label: "CHAT" },
   { href: "/trade", label: "TRADE" },
   { href: "/history", label: "HISTORY" },
@@ -29,7 +29,6 @@ export function AppNavbar() {
   const wallet = useWallet();
   const walletMenuRef = useRef<HTMLDivElement>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [offerCount, setOfferCount] = useState(0);
   const [walletOpen, setWalletOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -38,20 +37,18 @@ export function AppNavbar() {
 
     const loadStatus = async () => {
       try {
-        const [healthData, offersData] = await Promise.all([getHealth(), getDebugOffers()]);
+        const healthData = await getHealth();
         if (!active) {
           return;
         }
 
         setHealth(healthData);
-        setOfferCount(offersData.count);
       } catch {
         if (!active) {
           return;
         }
 
         setHealth(null);
-        setOfferCount(0);
       }
     };
 
@@ -83,7 +80,7 @@ export function AppNavbar() {
   }, [pathname]);
 
   const networkLabel = health
-    ? `${health.network.toUpperCase()} · ${health.status.toUpperCase()}`
+    ? `${(health.network || "").toUpperCase()} · ${(health.status || "").toUpperCase()}`
     : "SYNCING";
 
   return (
@@ -177,9 +174,6 @@ export function AppNavbar() {
           <div className="flex flex-wrap gap-2">
             <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[0.65rem] font-mono uppercase tracking-[0.25em] text-emerald-100">
               {networkLabel}
-            </span>
-            <span className="rounded-full border border-violet-400/20 bg-violet-500/10 px-3 py-1 text-[0.65rem] font-mono uppercase tracking-[0.25em] text-violet-100">
-              {offerCount} open offers
             </span>
           </div>
 

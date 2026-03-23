@@ -1,15 +1,16 @@
-'use client'
-import { useWallet } from '@/context/WalletContext'
+"use client";
+
+import { useWallet } from "@/context/WalletContext";
 
 export default function ConnectWallet() {
-  const { accountId, isConnected, isConnecting, connect, disconnect } = useWallet()
+  const { accountId, isConnected, isConnecting, connect, disconnect } = useWallet();
 
   if (isConnecting) {
     return (
       <button disabled className="connect-btn connecting">
-        ⏳ Opening HashPack...
+        ⏳ Opening wallet prompt...
       </button>
-    )
+    );
   }
 
   if (isConnected && accountId) {
@@ -17,12 +18,12 @@ export default function ConnectWallet() {
       <button onClick={disconnect} className="connect-btn connected">
         🟢 {accountId.slice(0, 8)}...
       </button>
-    )
+    );
   }
 
   return (
     <button onClick={connect} className="connect-btn">
       🔌 CONNECT WALLET
     </button>
-  )
+  );
 }

@@ -7,7 +7,13 @@ import { ReputationBoard } from "@/components/ReputationBoard";
 import { TradeNegotiationLog } from "@/components/TradeNegotiationLog";
 import { TradePanel } from "@/components/TradePanel";
 import { useWallet } from "@/context/WalletContext";
-import { TradeMessage, TradePayload, getTradeOffer } from "@/lib/api";
+import {
+  LiveOfferRecord,
+  TradeMessage,
+  TradePayload,
+  getLiveOffers,
+  getTradeOffer,
+} from "@/lib/api";
 
 const OFFER_POLL_MS = 3000;
 
@@ -23,9 +29,24 @@ export default function TradePage() {
   const [offer, setOffer] = useState<TradePayload | null>(null);
   const [offerPolling, setOfferPolling] = useState(false);
   const [offerError, setOfferError] = useState<string | null>(null);
+  const [offerPair, setOfferPair] = useState<{ token: string; buyToken: string } | null>(null);
+  const [tradeClosed, setTradeClosed] = useState(false);
   const [marketAgents, setMarketAgents] = useState<string[]>(
     CONFIGURED_MARKET_AGENT ? [CONFIGURED_MARKET_AGENT] : []
   );
+
+  function mapOfferRecord(record: LiveOfferRecord): TradePayload {
+    return {
+      wallet: record.wallet,
+      token: record.token,
+      amount: record.amount,
+      price: record.price,
+      buyToken: record.buyToken ?? "HBAR",
+      timestamp: record.timestamp,
+      requestId: record.requestId,
+      notes: record.notes ?? undefined,
+    };
+  }
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -47,15 +68,13 @@ export default function TradePage() {
   }, []);
 
   useEffect(() => {
-    if (!requestId) {
-      setOffer(null);
-      setOfferError(null);
-      setOfferPolling(false);
+    if (tradeClosed) {
       return;
     }
 
-    // Don't poll if we already have an offer
-    if (offer) {
+    if (!requestId) {
+      setOffer(null);
+      setOfferError(null);
       setOfferPolling(false);
       return;
     }
@@ -76,9 +95,17 @@ export default function TradePage() {
           return;
         }
 
-        // Map backend response to TradePayload format for display
-        const offerData: TradePayload = {
-          wallet: CONFIGURED_MARKET_AGENT,
+        if (
+          data.pending ||
+          (!data.offer && (!Number.isFinite(data.offeredPrice) || data.offeredPrice <= 0))
+        ) {
+          setOffer(null);
+          setOfferError(null);
+          return;
+        }
+
+        const fallbackOffer: TradePayload = {
+          wallet: accountId ?? CONFIGURED_MARKET_AGENT,
           token: "USDC",
           amount: data.usdcAmount,
           price: data.offeredPrice,
@@ -87,12 +114,16 @@ export default function TradePage() {
           requestId: data.requestId,
           notes: `Offer for ${data.usdcAmount} USDC → ${data.hbarAmount} HBAR`,
         };
+        const offerData: TradePayload = data.offer ?? fallbackOffer;
 
         const msgs = data.negotiation ?? [];
         setMessages(msgs);
         setOfferError(null);
+        setOfferPair({
+          token: offerData.token,
+          buyToken: offerData.buyToken ?? "HBAR",
+        });
 
-        // Stop polling as soon as the offer is available.
         setOffer(offerData);
         setMarketAgents((prev) => Array.from(new Set([...prev, CONFIGURED_MARKET_AGENT])));
         return;
@@ -129,7 +160,74 @@ export default function TradePage() {
         window.clearTimeout(retryTimer);
       }
     };
-  }, [requestId, offer]);
+  }, [accountId, requestId, tradeClosed]);
+
+  useEffect(() => {
+    // Only auto-discover newest offers when there is no active request yet.
+    // Once a requestId is selected, stay pinned to that request's offer stream.
+    if (!offerPair || tradeClosed || !!requestId) {
+      return;
+    }
+
+    let active = true;
+    let retryTimer: number | null = null;
+
+    const pollLiveOffers = async () => {
+      if (!active) {
+        return;
+      }
+
+      setOfferPolling(true);
+
+      try {
+        const data = await getLiveOffers({
+          token: offerPair.token,
+          buyToken: offerPair.buyToken,
+          excludeRequestId: requestId ?? undefined,
+        });
+
+        if (!active) {
+          return;
+        }
+
+        const newest = data.newest ? mapOfferRecord(data.newest) : null;
+        if (newest) {
+          setRequestId(newest.requestId);
+          setOffer(newest);
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem("agentfi:lastRequestId", newest.requestId);
+          }
+        }
+
+        setOfferError(null);
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
+        setOfferError(error instanceof Error ? error.message : "Failed to fetch live offers");
+      } finally {
+        if (active) {
+          setOfferPolling(false);
+        }
+      }
+
+      if (active) {
+        retryTimer = window.setTimeout(() => {
+          void pollLiveOffers();
+        }, OFFER_POLL_MS);
+      }
+    };
+
+    void pollLiveOffers();
+
+    return () => {
+      active = false;
+      if (retryTimer) {
+        window.clearTimeout(retryTimer);
+      }
+    };
+  }, [offerPair, requestId, tradeClosed]);
 
   if (!requestId) {
     return (
@@ -190,6 +288,15 @@ export default function TradePage() {
             walletAccountId={accountId}
             isWalletConnected={isConnected}
             onNegotiationUpdate={(items) => setMessages(items || [])}
+            onExecutionResult={(result) => {
+              if (result.executed) {
+                setTradeClosed(true);
+                return;
+              }
+
+              // Keep request active on rejections so MarketAgent can keep proposing offers.
+              setTradeClosed(false);
+            }}
           />
           <NegotiationFeed messages={messages} />
         </div>

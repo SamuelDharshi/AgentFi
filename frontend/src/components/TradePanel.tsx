@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { isAxiosError } from "axios";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { TradeExecutionResponse, TradePayload, executeTrade } from "@/lib/api";
+import { TradeExecutionResponse, TradePayload, executeTrade, getTradeOffer } from "@/lib/api";
 import { appendTradeHistory } from "@/lib/tradeHistory";
 
 interface TradePanelProps {
@@ -13,9 +14,21 @@ interface TradePanelProps {
   walletAccountId: string | null;
   isWalletConnected: boolean;
   onNegotiationUpdate: (messages: TradeExecutionResponse["negotiation"]) => void;
+  onExecutionResult?: (result: TradeExecutionResponse) => void;
 }
 
+type PanelStatus =
+  | "idle"
+  | "accepting"
+  | "rejecting"
+  | "searching_new_offer"
+  | "offer_found"
+  | "final_rejected"
+  | "executed";
+
 const OFFER_TTL_SECONDS = 300; // 5 minutes
+const AUTO_TRADE_ENABLED =
+  (process.env.NEXT_PUBLIC_AUTO_TRADE_AGENT ?? "").trim().toLowerCase() === "true";
 
 export function TradePanel({
   requestId,
@@ -25,18 +38,38 @@ export function TradePanel({
   walletAccountId,
   isWalletConnected,
   onNegotiationUpdate,
+  onExecutionResult,
 }: TradePanelProps) {
   const router = useRouter();
-  const [loadingAction, setLoadingAction] = useState<"accept" | "reject" | null>(null);
+  const [status, setStatus] = useState<PanelStatus>("idle");
   const [result, setResult] = useState<TradeExecutionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(OFFER_TTL_SECONDS);
   const [isExpired, setIsExpired] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [rejectCount, setRejectCount] = useState(0);
+  const [displayOffer, setDisplayOffer] = useState<TradePayload | null>(null);
+
+  // Keep displayOffer in sync with the prop, but allow overrides from new offers
+  useEffect(() => {
+    if (offer) setDisplayOffer(offer);
+  }, [offer]);
+
+  // Reset everything when requestId changes
+  useEffect(() => {
+    setResult(null);
+    setError(null);
+    setStatus("idle");
+    setIsSubmitting(false);
+    setCountdown(OFFER_TTL_SECONDS);
+    setIsExpired(false);
+    setRejectCount(0);
+    setDisplayOffer(null);
+  }, [requestId]);
 
   // Countdown timer with expiry handling
   useEffect(() => {
-    if (!offer || result) {
+    if (!displayOffer || result || status === "searching_new_offer") {
       setCountdown(OFFER_TTL_SECONDS);
       return;
     }
@@ -46,8 +79,6 @@ export function TradePanel({
         if (prev <= 1) {
           clearInterval(timer);
           setIsExpired(true);
-          // Auto-reject on expiry
-          handleExpiredOffer();
           return 0;
         }
         return prev - 1;
@@ -55,17 +86,7 @@ export function TradePanel({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [offer, result]);
-
-  const handleExpiredOffer = async () => {
-    if (!requestId || !offer) return;
-    
-    try {
-      await executeTrade(requestId, false, walletAccountId);
-    } catch (err) {
-      console.error("Auto-reject failed:", err);
-    }
-  };
+  }, [displayOffer, result, status]);
 
   const startNewTrade = () => {
     localStorage.removeItem("agentfi:lastRequestId");
@@ -75,17 +96,53 @@ export function TradePanel({
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
+  // Poll for a new offer after rejection
+  const startPollingForNewOffer = useCallback(() => {
+    if (!requestId) return;
+
+    const poll = async () => {
+      try {
+        const data = await getTradeOffer(requestId);
+        if (data && data.offeredPrice) {
+          const isNew = Boolean(data.offer?.isNewOffer);
+          const newOfferPayload: TradePayload = {
+            ...(data.offer ?? {
+              wallet: walletAccountId ?? "",
+              token: "USDC",
+              amount: data.usdcAmount,
+              price: data.offeredPrice,
+              buyToken: "HBAR",
+              timestamp: Date.now(),
+              requestId: data.requestId,
+            }),
+            notes: data.offer?.notes ?? "Better offer found! Market price refreshed.",
+          };
+          setDisplayOffer(newOfferPayload);
+          setCountdown(OFFER_TTL_SECONDS);
+          setIsExpired(false);
+          setStatus(isNew ? "offer_found" : "idle");
+          return;
+        }
+      } catch {
+        // 404 = offer not ready yet, keep polling
+      }
+
+      // Schedule next poll
+      setTimeout(poll, 3000);
+    };
+
+    setTimeout(poll, 3000);
+  }, [requestId, walletAccountId]);
+
   async function submit(accepted: boolean) {
-    // Prevent double submission
-    if (isSubmitting) {
-      console.log("Already submitting, skipping");
-      return;
-    }
-    
-    if (!requestId || !offer) {
+    if (isSubmitting) return;
+    if (!requestId || !displayOffer) return;
+
+    if (AUTO_TRADE_ENABLED) {
+      setError("Autonomous mode is enabled: the agent decides accept/reject automatically");
       return;
     }
 
@@ -94,60 +151,106 @@ export function TradePanel({
       return;
     }
 
+    if (accepted) {
+      const expectedOut = Math.round(displayOffer.amount / displayOffer.price);
+      const confirmed = window.confirm(
+        [
+          "Confirm trade on Hedera testnet:",
+          `Send: ${displayOffer.amount} ${displayOffer.token}`,
+          `Receive: ~${expectedOut} ${displayOffer.buyToken ?? "HBAR"}`,
+          "",
+          "Click OK to continue.",
+        ].join("\n")
+      );
+
+      if (!confirmed) {
+        setStatus("idle");
+        return;
+      }
+    }
+
     setIsSubmitting(true);
-    setLoadingAction(accepted ? "accept" : "reject");
+    setStatus(accepted ? "accepting" : "rejecting");
     setError(null);
 
     try {
       const data = await executeTrade(requestId, accepted, walletAccountId);
-      setResult(data);
       onNegotiationUpdate(data.negotiation || []);
+      onExecutionResult?.(data);
 
-      if (accepted && data.executed && offer) {
+      if (accepted && data.executed && displayOffer) {
         const txHash = data.txHash ?? data.transactionId ?? "";
         if (txHash) {
           appendTradeHistory({
             requestId,
-            token: offer.token,
-            amount: offer.amount,
-            price: offer.price,
-            buyToken: offer.buyToken ?? "HBAR",
+            token: displayOffer.token,
+            amount: displayOffer.amount,
+            price: displayOffer.price,
+            buyToken: displayOffer.buyToken ?? "HBAR",
             txHash,
-            usdcSent: data.usdcSent ?? (offer.token === "USDC" ? offer.amount : offer.amount * offer.price),
-            hbarReceived: data.hbarReceived ?? (offer.token === "USDC" ? offer.amount / offer.price : offer.amount),
+            usdcSent:
+              data.usdcSent ??
+              (displayOffer.token === "USDC"
+                ? displayOffer.amount
+                : displayOffer.amount * displayOffer.price),
+            hbarReceived:
+              data.hbarReceived ??
+              (displayOffer.token === "USDC"
+                ? displayOffer.amount / displayOffer.price
+                : displayOffer.amount),
             settlement: data.settlement ?? null,
             status: "executed",
             timestamp: Date.now(),
           });
         }
+        setResult(data);
+        setStatus("executed");
+        return;
       }
-      
+
+      // Handle rejection response
       if (!accepted) {
-        // Clear storage and URL on reject
-        localStorage.removeItem("agentfi:lastRequestId");
-        // Clear URL params
-        if (typeof window !== 'undefined') {
-          const url = new URL(window.location.href);
-          url.searchParams.delete('requestId');
-          window.history.replaceState({}, '', url.toString());
+        if (data.final) {
+          setStatus("final_rejected");
+          setResult(data);
+          return;
         }
-        setResult({
-          ...data,
-          executed: false,
-          message: "Trade declined. No funds moved.",
-        });
+
+        const newCount = data.rejectCount ?? rejectCount + 1;
+        setRejectCount(newCount);
+        setStatus("searching_new_offer");
+        setResult(null);
+        startPollingForNewOffer();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Trade execution failed");
+      if (isAxiosError(err)) {
+        const apiDetails =
+          (typeof err.response?.data?.details === "string" && err.response.data.details) ||
+          (typeof err.response?.data?.error === "string" && err.response.data.error) ||
+          null;
+        setError(apiDetails ?? err.message);
+      } else {
+        setError(err instanceof Error ? err.message : "Trade execution failed");
+      }
+      setStatus("idle");
     } finally {
       setIsSubmitting(false);
-      setLoadingAction(null);
     }
   }
 
-  const canAct = Boolean(requestId && offer && !offerError && !isExpired && !result);
+  const canAct = Boolean(
+    requestId &&
+      displayOffer &&
+      !offerError &&
+      !isExpired &&
+      status !== "executed" &&
+        status !== "final_rejected" &&
+      status !== "searching_new_offer" &&
+      status !== "accepting"
+  );
 
-  const transactionHash = result?.txHash ?? result?.transactionId ?? null;
+  const transactionHash =
+    result?.txHash ?? result?.transactionId ?? null;
 
   const txHashShortened = transactionHash
     ? `${transactionHash.slice(0, 10)}...${transactionHash.slice(-6)}`
@@ -160,111 +263,175 @@ export function TradePanel({
   return (
     <section className="card-dark">
       <h2 className="section-title">💰 Trade Execution</h2>
+      {AUTO_TRADE_ENABLED ? (
+        <p className="mt-2 text-sm text-emerald-300">
+          Autonomous mode active: agent evaluates offers and submits accept/reject automatically.
+        </p>
+      ) : null}
       <p className="mt-2 text-sm text-gray-300">
         Review the market offer and execute the atomic swap on Hedera EVM.
       </p>
 
-      {!isWalletConnected && !result && (
+      {!isWalletConnected && status !== "executed" && (
         <div className="mt-4 p-3 bg-red-500/20 border border-red-500/50 rounded text-red-300 text-sm">
-          ⚠️ Connect your HashPack wallet to accept trades
+          ⚠️ Connect your Hedera account to accept trades
         </div>
       )}
 
       <div className="mt-6 space-y-4">
         {!requestId ? (
           <div className="p-4 bg-yellow-500/10 border border-yellow-500/50 rounded text-yellow-300 text-sm font-mono">
-            📡 SCANNING FOR OFFERS [● ● ●]<br/>
-            <span className="text-xs text-gray-400 mt-1 block">Submit a trade from the chat to get started</span>
+            📡 SCANNING FOR OFFERS [● ● ●]
+            <br />
+            <span className="text-xs text-gray-400 mt-1 block">
+              Submit a trade from the chat to get started
+            </span>
           </div>
         ) : null}
 
-        {offerPolling && !offer ? (
-          <div className="text-violet-300 text-sm font-mono">📡 Polling HCS for offer...</div>
+        {offerPolling && !displayOffer ? (
+          <div className="text-violet-300 text-sm font-mono">
+            📡 Polling HCS for offer...
+          </div>
         ) : null}
 
-        {offerError && !offer ? (
+        {offerError && !displayOffer ? (
           <div className="text-red-400 text-sm font-mono">❌ {offerError}</div>
         ) : null}
 
-        {isExpired && !result && (
+        {isExpired && status !== "executed" && status !== "searching_new_offer" && (
           <div className="p-4 bg-red-500/10 border border-red-500/50 rounded text-center">
             <p className="text-red-400 font-bold mb-2">⏰ OFFER EXPIRED</p>
-            <p className="text-gray-400 text-sm mb-4">This trade offer has expired.</p>
-            <button
-              onClick={startNewTrade}
-              className="btn-cyan px-6 py-2"
-            >
+            <p className="text-gray-400 text-sm mb-4">
+              This trade offer has expired.
+            </p>
+            <button onClick={startNewTrade} className="btn-cyan px-6 py-2">
               START NEW TRADE
             </button>
           </div>
         )}
 
-        {offer ? (
-          <div className="card-dark bg-black/40 border-violet-400 p-4">
-            <p className="text-violet-300 font-mono text-xs mb-3">[ LIVE OFFER ]</p>
-            
-            {/* Countdown Timer */}
-            <div className="mb-4 p-2 bg-slate-900/50 rounded border border-violet-500/20">
-              <span className="text-xs text-slate-400 uppercase tracking-wider">Offer Expires In</span>
-              <div className={`countdown-timer ${countdown < 60 ? 'urgent' : ''}`}>
-                {formatTime(countdown)}
-              </div>
-            </div>
-            
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-400">YOU SEND</span>
-                <span className="text-white font-bold">{offer.amount} {offer.token}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">YOU GET</span>
-                <span className="text-violet-300 font-bold">{Math.round(offer.price)} {offer.buyToken ?? "HBAR"}</span>
-              </div>
-              <div className="flex justify-between pt-2 border-t border-violet-500/20">
-                <span className="text-gray-400">PRICE</span>
-                <span className="text-white font-mono">${offer.price.toFixed(6)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">SPREAD</span>
-                <span className="text-violet-300">0.5%</span>
-              </div>
-              {offer.notes && (
-                <p className="text-xs text-gray-400 pt-2 mt-2 border-t border-violet-500/20">{offer.notes}</p>
+        {/* ── SEARCHING FOR BETTER OFFER ── */}
+        {status === "searching_new_offer" && (
+          <div className="p-5 bg-violet-500/10 border-2 border-violet-500/40 rounded-lg text-center animate-pulse">
+            <p className="text-violet-300 font-bold text-lg mb-2">
+              🔄 Searching for better offer...
+            </p>
+            <p className="text-gray-400 text-sm mb-3">
+              🔄 Finding better offer...{" "}
+              {rejectCount > 0 && (
+                <span className="text-violet-400">
+                  (Attempt {rejectCount}/3)
+                </span>
               )}
+            </p>
+            <div className="flex justify-center mt-3">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-400" />
             </div>
           </div>
-        ) : requestId && !offerError && !isExpired && !result ? (
-          <div className="text-violet-300 text-sm font-mono">🔄 Waiting for market offer...</div>
+        )}
+
+        {/* ── LIVE OFFER CARD ── */}
+        {displayOffer &&
+          status !== "executed" &&
+          status !== "searching_new_offer" && (
+            <div className="card-dark bg-black/40 border-violet-400 p-4">
+              {status === "offer_found" && (
+                <div className="mb-3 px-3 py-1 bg-emerald-500/20 border border-emerald-500/40 rounded text-emerald-300 text-xs font-mono">
+                  ✨ New offer found! Better price available.
+                </div>
+              )}
+              <p className="text-violet-300 font-mono text-xs mb-3">
+                [ LIVE OFFER ]
+              </p>
+
+              {/* Countdown Timer */}
+              <div className="mb-4 p-2 bg-slate-900/50 rounded border border-violet-500/20">
+                <span className="text-xs text-slate-400 uppercase tracking-wider">
+                  Offer Expires In
+                </span>
+                <div
+                  className={`countdown-timer ${countdown < 60 ? "urgent" : ""}`}
+                >
+                  {formatTime(countdown)}
+                </div>
+              </div>
+
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">YOU SEND</span>
+                  <span className="text-white font-bold">
+                    {displayOffer.amount} {displayOffer.token}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">YOU GET</span>
+                  <span className="text-violet-300 font-bold">
+                    {Math.round(displayOffer.amount / displayOffer.price)}{" "}
+                    {displayOffer.buyToken ?? "HBAR"}
+                  </span>
+                </div>
+                <div className="flex justify-between pt-2 border-t border-violet-500/20">
+                  <span className="text-gray-400">PRICE</span>
+                  <span className="text-white font-mono">
+                    ${displayOffer.price.toFixed(6)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">SPREAD</span>
+                  <span className="text-violet-300">0.5%</span>
+                </div>
+                {displayOffer.notes && (
+                  <p className="text-xs text-gray-400 pt-2 mt-2 border-t border-violet-500/20">
+                    {displayOffer.notes}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+        {requestId &&
+          !displayOffer &&
+          !offerError &&
+          !isExpired &&
+          status !== "executed" &&
+          status !== "searching_new_offer" ? (
+          <div className="text-violet-300 text-sm font-mono">
+            🔄 Waiting for market offer...
+          </div>
         ) : null}
 
+        {/* ── ACTION BUTTONS ── */}
         {canAct && (
           <div className="flex flex-wrap gap-3">
             <button
               className="btn-cyan flex-1 accept-btn"
               type="button"
               onClick={() => void submit(true)}
-              disabled={isSubmitting || loadingAction !== null || !isWalletConnected}
+              disabled={AUTO_TRADE_ENABLED || isSubmitting || !isWalletConnected}
             >
-              {isSubmitting && loadingAction === "accept" ? "⏳ EXECUTING..." : "✅ ACCEPT TRADE"}
+              {isSubmitting && status === "accepting"
+                ? "⏳ EXECUTING..."
+                : "✅ ACCEPT TRADE"}
             </button>
             <button
               className="btn-red-outline flex-1 reject-btn"
               type="button"
               onClick={() => void submit(false)}
-              disabled={isSubmitting || loadingAction !== null}
+              disabled={AUTO_TRADE_ENABLED || isSubmitting}
             >
-              {isSubmitting && loadingAction === "reject" ? "..." : "❌ REJECT"}
+              {isSubmitting && status === "rejecting" ? "..." : "❌ REJECT"}
             </button>
           </div>
         )}
 
-        {/* Simple Loading Spinner while executing */}
-        {loadingAction === "accept" && (
+        {/* Loading spinner while accepting */}
+        {status === "accepting" && (
           <div className="p-4 bg-violet-500/10 border border-violet-500/30 rounded text-center">
             <p className="text-violet-300 font-bold mb-2">⏳ Executing trade...</p>
             <p className="text-gray-400 text-sm">This may take 30-60 seconds</p>
             <div className="mt-3 flex justify-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-400"></div>
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-400" />
             </div>
           </div>
         )}
@@ -276,55 +443,83 @@ export function TradePanel({
         </div>
       )}
 
-      {/* ACCEPT Success Result */}
-      {result?.executed && (
+      {/* ── TRADE COMPLETE (FIX 5) ── */}
+      {status === "executed" && result?.executed && (
         <div className="mt-6 p-5 border-2 border-emerald-400/50 bg-emerald-400/10 rounded-lg">
-          <p className="text-emerald-300 font-bold text-lg mb-4 text-center">✅ TRADE COMPLETE</p>
+          <p className="text-emerald-300 font-bold text-lg mb-4 text-center">
+            ✅ TRADE COMPLETE!
+          </p>
 
           {(() => {
-            const sentAmount = result.usdcSent ?? (offer?.token === "USDC" ? offer?.amount ?? 0 : (offer?.amount ?? 0) * (offer?.price ?? 0));
-            const receivedAmount = result.hbarReceived ?? (offer?.token === "USDC" ? (offer?.amount ?? 0) / (offer?.price ?? 1) : offer?.amount ?? 0);
+            const sentAmount =
+              result.usdcSent ??
+              (displayOffer?.token === "USDC"
+                ? displayOffer?.amount ?? 0
+                : (displayOffer?.amount ?? 0) *
+                  (displayOffer?.price ?? 0));
+            const receivedAmount =
+              result.hbarReceived ??
+              (displayOffer?.token === "USDC"
+                ? (displayOffer?.amount ?? 0) / (displayOffer?.price ?? 1)
+                : displayOffer?.amount ?? 0);
 
             return (
               <div className="space-y-3 text-sm mb-4">
                 <div className="flex justify-between items-center py-2 border-b border-emerald-400/20">
                   <span className="text-gray-400">YOU SENT</span>
                   <span className="text-white font-bold text-lg">
-                    {sentAmount} {offer?.token}
+                    {sentAmount} {displayOffer?.token}
                   </span>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-emerald-400/20">
                   <span className="text-gray-400">YOU GOT</span>
                   <span className="text-emerald-300 font-bold text-lg">
-                    {receivedAmount} {offer?.buyToken ?? "HBAR"}
+                    {receivedAmount} {displayOffer?.buyToken ?? "HBAR"}
                   </span>
                 </div>
-                <div className="flex justify-between items-center py-2">
+                <div className="flex justify-between items-center py-2 border-b border-emerald-400/20">
                   <span className="text-gray-400">TX HASH</span>
-                  <a 
-                    href={hashScanUrl || "#"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-violet-300 hover:text-violet-200 font-mono text-xs"
-                  >
-                    {txHashShortened}
-                  </a>
+                  {hashScanUrl ? (
+                    <a
+                      href={hashScanUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-violet-300 hover:text-violet-200 font-mono text-xs underline"
+                    >
+                      {txHashShortened}
+                    </a>
+                  ) : (
+                    <span className="text-gray-500 text-xs">N/A</span>
+                  )}
                 </div>
+                {result.settlement && (
+                  <div className="rounded-lg border border-emerald-400/20 bg-black/20 p-3 text-xs text-emerald-100/90">
+                    <p className="mb-1 uppercase tracking-[0.2em] text-emerald-200/70">
+                      Settlement
+                    </p>
+                    <p className="font-mono leading-relaxed break-all">
+                      {result.settlement}
+                    </p>
+                  </div>
+                )}
               </div>
             );
           })()}
-          
+
           {hashScanUrl && (
             <a
               href={hashScanUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="btn-cyan-outline block text-center py-3 mb-3"
+              className="flex items-center justify-center gap-2 w-full py-3 mb-3 border-2 border-emerald-400 bg-emerald-500/10 text-emerald-300 font-bold hover:bg-emerald-500/20 transition rounded"
             >
-              🔍 VIEW ON HASHSCAN →
+              🔗 VIEW ON HASHSCAN
+              <span className="text-xs text-emerald-400/70 truncate max-w-[200px]">
+                hashscan.io/testnet/…
+              </span>
             </a>
           )}
-          
+
           <button
             onClick={startNewTrade}
             className="btn-cyan w-full py-3 text-center"
@@ -334,21 +529,18 @@ export function TradePanel({
         </div>
       )}
 
-      {/* REJECT Result */}
-      {result && !result.executed && (
+      {status === "final_rejected" && (
         <div className="mt-6 p-5 border-2 border-red-400/50 bg-red-400/10 rounded-lg text-center">
-          <p className="text-red-400 font-bold text-lg mb-3">❌ TRADE REJECTED</p>
-          <p className="text-gray-300 mb-2">The offer has been declined.</p>
-          <p className="text-gray-400 text-sm mb-6">No funds were moved.</p>
-          
-          <button
-            onClick={startNewTrade}
-            className="btn-cyan w-full py-3"
-          >
+          <p className="text-red-300 font-bold text-lg mb-2">❌ No better offers available</p>
+          <p className="text-sm text-red-200 mb-4">
+            You rejected 3 offers. Start a new trade to continue.
+          </p>
+          <button onClick={startNewTrade} className="btn-cyan w-full py-3">
             🚀 START NEW TRADE
           </button>
         </div>
       )}
+
     </section>
   );
 }
