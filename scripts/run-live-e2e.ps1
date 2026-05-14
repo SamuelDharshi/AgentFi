@@ -121,6 +121,14 @@ if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) {
   }
 }
 
+if ([string]::IsNullOrWhiteSpace($env:ANTHROPIC_API_KEY)) {
+  $fallbackAnthropicKey = Get-EnvValueFromFile -EnvFilePath $backendEnvFile -KeyName "ANTHROPIC_API_KEY"
+  if (-not [string]::IsNullOrWhiteSpace($fallbackAnthropicKey)) {
+    $env:ANTHROPIC_API_KEY = $fallbackAnthropicKey
+    Write-Step "Using ANTHROPIC_API_KEY fallback from backend/.env"
+  }
+}
+
 if (-not $env:USER_EVM_KEY -and $env:USER_KEY) {
   $env:USER_EVM_KEY = $env:USER_KEY
 }
@@ -152,7 +160,6 @@ $requiredEnv = @(
   "USER_EVM_ADDRESS",
   "USER_EVM_KEY",
   "HTS_TOKEN_ID",
-  "OPENAI_API_KEY",
   "ATOMIC_SWAP_ADDRESS",
   "ERC8004_REGISTRY_ADDRESS"
 )
@@ -163,6 +170,11 @@ foreach ($key in $requiredEnv) {
   if ([string]::IsNullOrWhiteSpace($value)) {
     $missing += $key
   }
+}
+
+# Check for either OpenAI or Anthropic
+if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY) -and [string]::IsNullOrWhiteSpace($env:ANTHROPIC_API_KEY)) {
+  $missing += "OPENAI_API_KEY or ANTHROPIC_API_KEY"
 }
 
 if ($missing.Count -gt 0) {

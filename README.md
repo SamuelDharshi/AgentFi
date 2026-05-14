@@ -8,8 +8,8 @@
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  User connects wallet  →  Types trade intent (e.g., "sell 1k    │
-│  USDC for HBAR") → UserAgent (OpenAI) parses intent →           │
-│  MarketAgent (OpenAI) generates offer via HCS topic →           │
+│  USDC for HBAR") → UserAgent (Anthropic) parses intent →        │
+│  MarketAgent (Anthropic) generates offer via HCS topic →        │
 │  Frontend displays live offer → User accepts → TradeExecutor    │
 │  submits AtomicSwap contract call → Settlement on Hedera        │
 │                                                                 │
@@ -141,8 +141,8 @@ Hedera Testnet
 - **Status Dashboard**: Real-time agent activity observer
 
 ### ✅ Agent Architecture
-- **UserAgent (OpenAI GPT-4)**: Parses trade intent, validates amounts
-- **MarketAgent (OpenAI GPT-4)**: Generates competitive offers based on market data
+- **UserAgent (Anthropic Claude 3.5 Sonnet)**: Parses trade intent, validates amounts
+- **MarketAgent (Anthropic Claude 3.5 Sonnet)**: Generates competitive offers based on market data
 - **Communication Module**: Encrypted HCS message exchange
 - **TradeExecutor**: Atomic swap contract execution
 
@@ -247,6 +247,10 @@ npm run test:backend
 6. Click **"ACCEPT TRADE"** → settlement on Hedera
 7. Verify tx on [HashScan Testnet](https://hashscan.io/testnet)
 
+### 🔗 Verified Live Trade
+- **AtomicSwap Execution**: [0xd15bba61...](https://hashscan.io/testnet/transaction/0xd15bba61acfde9e761cca217bb02aebf95d2e61ce3b98b3c847e01c5c4efed47)
+- **Status**: ✅ Settled on Hedera Testnet
+
 ## 📚 Documentation
 
 - [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md) - Complete architecture + setup guide
@@ -331,6 +335,5 @@ npm run dev
 
 ## Constraints Followed
 
-- No smart contracts
 - No orderbook engine
 - Focused on AI agents, agent communication, and Hedera service integration
